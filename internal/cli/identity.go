@@ -28,7 +28,7 @@ func cliCreateNewSOPSIdentity(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	identityPath := identity.GetSOPSIdentityPath(*cfg)
-	_, identityErr := identity.CreateNewSOPSIdentity(identityPath)
+	_, identityErr := identity.MaybeCreateNewSOPSIdentity(identityPath)
 	if identityErr != nil {
 		return identityErr
 	}

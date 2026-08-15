@@ -69,7 +69,7 @@ func makeKeyFileContents(identity *age.X25519Identity) []byte {
 	return []byte(keyFileContents)
 }
 
-func CreateNewSOPSIdentity(identityPath string) (*string, error) {
+func MaybeCreateNewSOPSIdentity(identityPath string) (*string, error) {
 	fileExists, err := checkKeyFileExists(identityPath)
 	if err != nil {
 		return nil, err
