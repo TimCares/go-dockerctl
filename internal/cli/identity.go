@@ -5,7 +5,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/TimCares/go-infractl/internal/identity"
+	"github.com/TimCares/go-dockerctl/internal/config"
+	"github.com/TimCares/go-dockerctl/internal/identity"
 )
 
 var identityCommand = &cli.Command{
@@ -13,7 +14,7 @@ var identityCommand = &cli.Command{
 	Usage: "Manage SOPS identities",
 	Commands: []*cli.Command{
 		{
-			Name:   "create",
+			Name:   "init",
 			Usage:  "Create new Identity",
 			Action: cliCreateNewSOPSIdentity,
 		},
@@ -21,5 +22,16 @@ var identityCommand = &cli.Command{
 }
 
 func cliCreateNewSOPSIdentity(ctx context.Context, cmd *cli.Command) error {
-	return identity.CreateNewSOPSIdentity(ctx)
+	cfg, configErr := config.GetConfig(cmd.String("config"), cmd.String("project"), cmd.String("env"))
+	if configErr != nil {
+		return configErr
+	}
+
+	identityPath := identity.GetSOPSIdentityPath(*cfg)
+	_, identityErr := identity.CreateNewSOPSIdentity(identityPath)
+	if identityErr != nil {
+		return identityErr
+	}
+
+	return nil
 }

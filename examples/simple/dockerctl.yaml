@@ -1,0 +1,9 @@
+
+manage_private_key_location: True
+
+name: dockerctl-simple-example-project
+
+envs:
+  - dev
+  - stage
+  - prod

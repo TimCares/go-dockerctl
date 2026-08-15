@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	infractlcli "github.com/TimCares/go-infractl/internal/cli"
-	"github.com/TimCares/go-infractl/internal/logger"
+	dockerctl "github.com/TimCares/go-dockerctl/internal/cli"
+	"github.com/TimCares/go-dockerctl/internal/logger"
 )
 
 func main() {
@@ -22,7 +22,7 @@ func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := infractlcli.New().Run(ctx, os.Args); err != nil {
+	if err := dockerctl.New().Run(ctx, os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		return 1
 	}
