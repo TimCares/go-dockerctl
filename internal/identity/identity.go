@@ -135,7 +135,7 @@ func GetSOPSIdentityPath(config config.Config) string {
 	if userConfigDir == "" {
 		userConfigDir = os.Getenv("HOME")
 	}
-	if config.ManagePrivateKeyLocation {
+	if config.ManageSOPSIdentities {
 		return filepath.Join(userConfigDir, config.Name, config.Runtime.ActiveEnv, defaultAgeKeyFileSubpath)
 	} else {
 		return filepath.Join(userConfigDir, defaultAgeKeyFileSubpath)

@@ -1,5 +1,5 @@
 
-manage_private_key_location: True
+manage_sops_identities: True
 
 name: dockerctl-simple-example-project
 

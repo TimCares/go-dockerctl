@@ -15,10 +15,10 @@ type RuntimeConfig struct {
 }
 
 type Config struct {
-	Runtime                  RuntimeConfig
-	Name                     string   `yaml:"name"`
-	Envs                     []string `yaml:"envs"`
-	ManagePrivateKeyLocation bool     `yaml:"manage_private_key_location"`
+	Runtime              RuntimeConfig
+	Name                 string   `yaml:"name"`
+	Envs                 []string `yaml:"envs"`
+	ManageSOPSIdentities bool     `yaml:"manage_sops_identities"`
 }
 
 func getRuntimeConfig(config Config, projectDir string, activeEnv string) (*RuntimeConfig, error) {
