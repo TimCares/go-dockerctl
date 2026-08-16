@@ -7,3 +7,6 @@ envs:
   - dev
   - stage
   - prod
+
+service_groups:
+  - name: test1
