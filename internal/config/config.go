@@ -2,12 +2,17 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 
 	"go.uber.org/zap"
 	"go.yaml.in/yaml/v4"
+
+	"github.com/TimCares/go-dockerctl/internal/docker"
+	dockerctlFilesystem "github.com/TimCares/go-dockerctl/internal/filesystem"
 )
 
 type RuntimeConfig struct {
@@ -15,19 +20,23 @@ type RuntimeConfig struct {
 	ActiveEnv  string
 }
 
-const serviceGroupsDefaultDirName = "service-groups"
+const ServiceGroupsDefaultDirName = "service-groups"
+const DockerComposeDefaultFileName = "docker-compose.yaml"
 
 type ServiceGroup struct {
-	Name string  `yaml:"name"`
-	Path *string `yaml:"path"`
+	Name              string `yaml:"name"`
+	Path              string `yaml:"path"`
+	DockerComposeFile string `yaml:"docker_compose_file"`
 }
+
+//TODO: func (g ServiceGroup) filename() string
 
 type Config struct {
 	Runtime              RuntimeConfig
 	Name                 string         `yaml:"name"`
 	Envs                 []string       `yaml:"envs"`
 	ManageSOPSIdentities bool           `yaml:"manage_sops_identities"`
-	serviceGroups        []ServiceGroup `yaml:"service_groups"`
+	ServiceGroups        []ServiceGroup `yaml:"service_groups"`
 }
 
 func getRuntimeConfig(config Config, projectDir string, activeEnv string) (*RuntimeConfig, error) {
@@ -37,16 +46,36 @@ func getRuntimeConfig(config Config, projectDir string, activeEnv string) (*Runt
 		return nil, err
 	}
 
-	info, err := os.Stat(projectDir)
-	if err != nil || !info.IsDir() {
-		err := errors.New("project directory does not exist")
-		zap.L().Error(err.Error(), zap.String("projectDir", projectDir))
-	}
-
 	return &RuntimeConfig{
 		ProjectDir: projectDir,
 		ActiveEnv:  activeEnv,
 	}, nil
+}
+
+// kebab-case
+var validServiceGroupNamePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
+func validateServiceGroupConfig(config *Config) error {
+	for _, serviceGroup := range config.ServiceGroups {
+		if !validServiceGroupNamePattern.MatchString(serviceGroup.Name) {
+			errorMesg := fmt.Sprintf("Invalid service group name, must be kebab-case, found '%s'", serviceGroup.Name)
+			err := errors.New(errorMesg)
+			zap.L().Error(err.Error(), zap.String("serviceGroupName", serviceGroup.Name), zap.String("expectedPattern", validServiceGroupNamePattern.String()))
+			return err
+		}
+
+		if serviceGroup.Path == "" {
+			defaultServiceGroupPath := filepath.Join(config.Runtime.ProjectDir, ServiceGroupsDefaultDirName, serviceGroup.Name)
+			zap.L().Debug("Service group has no explicit path, using default", zap.String("serviceGroupName", serviceGroup.Name), zap.String("defaultServiceGroupPath", defaultServiceGroupPath))
+			serviceGroup.Path = defaultServiceGroupPath
+		}
+
+		if serviceGroup.DockerComposeFile == "" {
+			zap.L().Debug("Service group has no explicit docker compose file name, using default", zap.String("serviceGroupName", serviceGroup.Name), zap.String("DockerComposeDefaultFileName", DockerComposeDefaultFileName))
+			serviceGroup.DockerComposeFile = DockerComposeDefaultFileName
+		}
+	}
+	return nil
 }
 
 func GetConfig(configFilePath string, projectDir string, activeEnv string) (*Config, error) {
@@ -56,42 +85,49 @@ func GetConfig(configFilePath string, projectDir string, activeEnv string) (*Con
 		return nil, err
 	}
 
-	configBody, err := os.ReadFile(configFilePath)
-	if err != nil {
-		zap.L().Error("error reading config file", zap.Error(err), zap.String("configFilePath", configFilePath))
-		return nil, err
+	configBody, readErr := os.ReadFile(configFilePath)
+	if readErr != nil {
+		zap.L().Error("error reading config file", zap.Error(readErr), zap.String("configFilePath", configFilePath))
+		return nil, readErr
 	}
 
 	var cfg Config
 
-	if err := yaml.Unmarshal(configBody, &cfg); err != nil {
-		zap.L().Error("error parsing config file", zap.Error(err))
-		return nil, err
+	if yamlErr := yaml.Unmarshal(configBody, &cfg); yamlErr != nil {
+		zap.L().Error("error parsing config file", zap.Error(yamlErr))
+		return nil, yamlErr
 	}
 
-	for _, serviceGroup := range cfg.serviceGroups {
-		if serviceGroup.Path == nil || *serviceGroup.Path == "" {
-			defaultServiceGroupPath := filepath.Join(cfg.Runtime.ProjectDir, serviceGroupsDefaultDirName, serviceGroup.Name)
-			serviceGroup.Path = &defaultServiceGroupPath
-		}
-
-		if info, err := os.Stat(*serviceGroup.Path); err != nil {
-			if os.IsNotExist(err) {
-
-			}
-			if !info.IsDir() {
-
-			}
-			// also check general structure that we require for our prjects, but put it into separate validation func
-		}
-	}
-
-	runtimeConfig, err := getRuntimeConfig(cfg, projectDir, activeEnv)
-	if err != nil {
-		return nil, err
+	runtimeConfig, runtimeConfigErr := getRuntimeConfig(cfg, projectDir, activeEnv)
+	if runtimeConfigErr != nil {
+		// TODO: log
+		return nil, runtimeConfigErr
 	}
 
 	cfg.Runtime = *runtimeConfig
+
+	configValidationErr := validateServiceGroupConfig(&cfg)
+	if configValidationErr != nil {
+		// TODO: log
+		return nil, configValidationErr
+	}
+
+	// Validate the dockerctl filesystem structure.
+	dockerctlFilesystem := dockerctlFilesystem.MakeDockerctlFilesystem(&cfg)
+	filesystemErr := dockerctlFilesystem.Validate(cfg.Runtime.ProjectDir)
+	if configValidationErr != nil {
+		// TODO: log
+		return nil, filesystemErr
+	}
+
+	for _, serviceGroup := range cfg.ServiceGroups {
+		dockerComposeValidationErr := docker.ValidateDockerComposeFile(&serviceGroup)
+		if dockerComposeValidationErr != nil {
+			// TODO: log
+			return nil, dockerComposeValidationErr
+		}
+
+	}
 
 	return &cfg, nil
 }
