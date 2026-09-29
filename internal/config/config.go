@@ -24,9 +24,11 @@ const ServiceGroupsDefaultDirName = "service-groups"
 const DockerComposeDefaultFileName = "docker-compose.yaml"
 
 type ServiceGroup struct {
-	Name              string `yaml:"name"`
-	Path              string `yaml:"path"`
-	DockerComposeFile string `yaml:"docker_compose_file"`
+	Path              string    `yaml:"path"`
+	Name              string    `yaml:"name"`
+	DockerComposeFile string    `yaml:"docker_compose_file"`
+	Envs              *[]string `yaml:"envs,omitempty"`
+	DisableDeploy     bool      `yaml:"disable_deploy"`  // Helpful if you have a service group that should not always be deployed, but want to list it for consistency.
 }
 
 //TODO: func (g ServiceGroup) filename() string
@@ -53,13 +55,21 @@ func getRuntimeConfig(config Config, projectDir string, activeEnv string) (*Runt
 }
 
 // kebab-case
-var validServiceGroupNamePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+var validServiceGroupNamePattern = regexp.MustCompile(`^[a-z]+(?:-[a-z0-9]+)*$`)
 
+// For each service group mentioned in the config, checks:
+// 1. Service group name validity.
+// 2. Service group path validity (if given, else set default).
+// 3. Docker compose file name validity (if given, else set default).
+// 4. Check if the envs of a service group are a subset of the global envs.
+//
+// Note that it does not check the filesystem validity, only the service group configs.
+// Returns an error if any of the checked points are invalid, writes defaults into the config if fields are empty.
 func validateServiceGroupConfig(config *Config) error {
 	for _, serviceGroup := range config.ServiceGroups {
 		if !validServiceGroupNamePattern.MatchString(serviceGroup.Name) {
-			errorMesg := fmt.Sprintf("Invalid service group name, must be kebab-case, found '%s'", serviceGroup.Name)
-			err := errors.New(errorMesg)
+			errorMsg := fmt.Sprintf("Invalid service group name, must be kebab-case and start with a lowercase letter, found '%s'", serviceGroup.Name)
+			err := errors.New(errorMsg)
 			zap.L().Error(err.Error(), zap.String("serviceGroupName", serviceGroup.Name), zap.String("expectedPattern", validServiceGroupNamePattern.String()))
 			return err
 		}
@@ -73,6 +83,12 @@ func validateServiceGroupConfig(config *Config) error {
 		if serviceGroup.DockerComposeFile == "" {
 			zap.L().Debug("Service group has no explicit docker compose file name, using default", zap.String("serviceGroupName", serviceGroup.Name), zap.String("DockerComposeDefaultFileName", DockerComposeDefaultFileName))
 			serviceGroup.DockerComposeFile = DockerComposeDefaultFileName
+		}
+
+		if serviceGroup.Envs == nil {
+			serviceGroup.Envs = &slices.Clone(config.Envs)
+		} else {
+			// TODO: check serviceGroup.Envs is subset of config.Envs + no duplications
 		}
 	}
 	return nil
@@ -110,6 +126,18 @@ func GetConfig(configFilePath string, projectDir string, activeEnv string) (*Con
 	if configValidationErr != nil {
 		// TODO: log
 		return nil, configValidationErr
+	}
+
+	if len(cfg.Envs) == 0 {
+		envsLenError := errors.New("List of `Envs` must not be empty.")
+		zap.L().Error(envsLenError.Error())
+		return nil, envsLenError
+	}
+
+	if len(cfg.ServiceGroups) == 0 {
+		serviceGroupsLenError := errors.New("At least one service group must be contained in `ServiceGroups`.")
+		zap.L().Error(serviceGroupsLenError.Error())
+		return nil, serviceGroupsLenError
 	}
 
 	// Validate the dockerctl filesystem structure.

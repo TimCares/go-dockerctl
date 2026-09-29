@@ -12,6 +12,9 @@ type Node interface {
 
 type File struct{}
 
+// Octal 600
+type SecretFile struct{}
+
 type Dir map[string]Node
 
 type Optional struct {
@@ -22,7 +25,7 @@ type AtLeastOne struct {
 	Node Node
 }
 
-func (File) Validate(path string) error {
+func validateFileImpl(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -36,6 +39,10 @@ func (File) Validate(path string) error {
 	}
 
 	return nil
+}
+
+func (File) Validate(path string) error {
+	validateFileImpl(path)	
 }
 
 func (d Dir) Validate(path string) error {

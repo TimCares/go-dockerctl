@@ -57,7 +57,11 @@ func MakeDockerctlFilesystem(config *configModule.Config) Dir {
 	}
 
 	for _, serviceGroup := range config.ServiceGroups {
-		projectStructure[configModule.ServiceGroupsDefaultDirName][serviceGroup.Name] = makeServiceGroupDir(&config.Envs, &serviceGroup)
+		envs := &config.Envs
+		if serviceGroup.Envs != nil {  // Takes precedence.
+			envs = &serviceGroup.Envs
+		}
+		projectStructure[configModule.ServiceGroupsDefaultDirName][serviceGroup.Name] = makeServiceGroupDir(envs, &serviceGroup)
 	}
 
 	return projectStructure
