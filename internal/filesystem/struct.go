@@ -12,7 +12,7 @@ type Node interface {
 
 type File struct{}
 
-// Octal 600
+// Octal 600.
 type SecretFile struct{}
 
 type Dir map[string]Node

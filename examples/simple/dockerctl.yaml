@@ -1,14 +1,15 @@
 
-manage_sops_identities: True
-
+apiVersion: 0
 name: dockerctl-simple-example-project
 
-shared_networks:
+manageSopsIdentities: True
+
+sharedNetworks:
 
 envs:
   - dev
   - stage
   - prod
 
-service_groups:
+serviceGroups:
   - name: test1

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -8,11 +9,34 @@ import (
 	"regexp"
 	"slices"
 
+	"github.com/TimCares/go-see"
 	"go.uber.org/zap"
 	"go.yaml.in/yaml/v4"
 )
 
-// kebab-case
+const configApiVersion uint = 1
+
+// checkMajorAPIVersionMatch finds the first occurrence of "apiVersion" in "rawConfigBody"
+// (must be at the beginning of a line) and checks whether the (major) version matches
+// with the major version of dockerctl currently running.
+func checkMajorAPIVersionMatch(ctx context.Context, rawConfigBody []byte) error {
+	var cfg ConfigVersion
+	if err := yaml.Unmarshal(rawConfigBody, &cfg); err != nil {
+		return fmt.Errorf("parsing config file, missing apiVersion: %w", err)
+	}
+
+	if cfg.ApiVersion == configApiVersion {
+		return nil
+	}
+	if cfg.ApiVersion > configApiVersion {
+		return fmt.Errorf("config apiVersion too high, found %d, expected %d", cfg.ApiVersion, configApiVersion)
+	}
+	// cfg.ApiVersion < configApiVersion
+	see.L(ctx).Warn("config file api version larger than in code", zap.Uint("file", cfg.ApiVersion), zap.Uint("code", configApiVersion))
+	// Later: try to apply migrations if necessary.
+	return nil
+}
+
 var validServiceGroupNamePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`)
 
 // For each service group mentioned in the config, checks:
@@ -61,7 +85,7 @@ func validateServiceGroupConfig(config *Config) error {
 
 // Load reads and validates the dockerctl config file. It does not touch the project
 // filesystem or Docker; see the project package for full project validation.
-func Load(configFilePath string, projectDir string, activeEnv string) (*Config, error) {
+func Load(ctx context.Context, configFilePath string, projectDir string, activeEnv string) (*Config, error) {
 	if configFilePath == "" {
 		return nil, errors.New("config file path must not be empty")
 	}
@@ -69,6 +93,10 @@ func Load(configFilePath string, projectDir string, activeEnv string) (*Config, 
 	configBody, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("reading config file: %w", err)
+	}
+
+	if err := checkMajorAPIVersionMatch(ctx, configBody); err != nil {
+		return nil, err
 	}
 
 	var cfg Config

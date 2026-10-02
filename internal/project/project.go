@@ -15,7 +15,7 @@ import (
 // Load parses the config and validates the project on disk, including every
 // service group's docker compose file. This requires a reachable Docker daemon.
 func Load(ctx context.Context, configFilePath, projectDir, activeEnv string) (*config.Config, error) {
-	cfg, err := config.Load(configFilePath, projectDir, activeEnv)
+	cfg, err := config.Load(ctx, configFilePath, projectDir, activeEnv)
 	if err != nil {
 		return nil, err
 	}
