@@ -42,7 +42,7 @@ func validateFileImpl(path string) error {
 }
 
 func (File) Validate(path string) error {
-	validateFileImpl(path)	
+	return validateFileImpl(path)
 }
 
 func (d Dir) Validate(path string) error {

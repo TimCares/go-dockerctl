@@ -56,6 +56,13 @@ func New() *cli.Command {
 				Value:   logger.DefaultLogFile(),
 				Sources: cli.EnvVars("DOCKERCTL_LOG_FILE"),
 			},
+			// TODO?
+			// &cli.BoolFlag{
+			// 	Name:    "enable-docker-env-var-templating",
+			// 	Usage:   "Fall back to env var templating (${...}) in docker compose instead of go templating ({{ ... }})",
+			// 	Value:   false,
+			// 	Sources: cli.EnvVars("DOCKERCTL_ENABLE_DOCKER_ENV_VAR_TEMPLATING"),
+			// },
 		},
 		Commands: []*cli.Command{
 			identityCommand,

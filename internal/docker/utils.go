@@ -3,80 +3,70 @@ package docker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
 
-	"github.com/TimCares/go-dockerctl/internal/config"
-	"github.com/TimCares/go-dockerctl/internal/docker"
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/cli/cli/flags"
 	"github.com/docker/compose/v5/pkg/api"
 	"github.com/docker/compose/v5/pkg/compose"
-	"go.uber.org/zap"
+
+	"github.com/TimCares/go-dockerctl/internal/config"
 )
 
-var dockerComposeService *api.Compose
-
-func GetDockerComposeService() (*api.Compose, error) {
-	if dockerComposeService != nil {
-		return dockerComposeService, nil
+// GetDockerComposeService lazily creates a single compose service for the whole process.
+var GetDockerComposeService = sync.OnceValues(func() (api.Compose, error) {
+	dockerCLI, err := command.NewDockerCli()
+	if err != nil {
+		return nil, fmt.Errorf("creating docker cli: %w", err)
 	}
 
-	dockerCLI, dockerCLIErr := command.NewDockerCli()
-	if dockerCLIErr != nil {
-		return nil, dockerCLIErr
+	if err := dockerCLI.Initialize(&flags.ClientOptions{}); err != nil {
+		return nil, fmt.Errorf("initializing docker cli: %w", err)
 	}
 
-	if initErr := dockerCLI.Initialize(&flags.ClientOptions{}); initErr != nil {
-		return nil, initErr
+	composeService, err := compose.NewComposeService(dockerCLI)
+	if err != nil {
+		return nil, fmt.Errorf("creating compose service: %w", err)
 	}
 
-	composeService, composeErr := compose.NewComposeService(dockerCLI)
-	if composeErr != nil {
-		return nil, composeErr
-	}
-
-	dockerComposeService = &composeService
-
-	return dockerComposeService, nil
-}
+	return composeService, nil
+})
 
 var envVariablePattern = regexp.MustCompile(
 	`\$\{[A-Za-z_][A-Za-z0-9_]*(?::?-[^}]*)?\}`,
 )
 
-func ValidateDockerComposeFile(serviceGroup *config.ServiceGroup) error {
+var errEnvVariablePlaceholder = errors.New("docker compose file contains env variable placeholders, which are not allowed in dockerctl; use Go templating '{{ value }}' instead")
+
+func ValidateDockerComposeFile(ctx context.Context, serviceGroup *config.ServiceGroup) error {
 	dockerComposeFilePath := filepath.Join(serviceGroup.Path, serviceGroup.DockerComposeFile)
-	dockerComposeBody, readErr := os.ReadFile(dockerComposeFilePath) // Do not use os.Stat here, as we are also interested in the contents.
-
-	if readErr != nil {
-		zap.L().Error(readErr.Error(), zap.String("serviceGroupName", serviceGroup.Name), zap.String("dockerComposeFilePath", dockerComposeFilePath))
-		return readErr
+	dockerComposeBody, err := os.ReadFile(dockerComposeFilePath) // Do not use os.Stat here, as we are also interested in the contents.
+	if err != nil {
+		return fmt.Errorf("service group %q: %w", serviceGroup.Name, err)
 	}
 
-	composeService, getComposeErr := docker.GetDockerComposeService()
-	if getComposeErr != nil {
-		return getComposeErr
+	if envVariablePattern.Match(dockerComposeBody) {
+		return fmt.Errorf("service group %q (%s): %w", serviceGroup.Name, dockerComposeFilePath, errEnvVariablePlaceholder)
 	}
 
-	ctx := context.Background()
+	composeService, err := GetDockerComposeService()
+	if err != nil {
+		return err
+	}
 
 	// This validates the compose format as a side effect, which is the only thing we are currently interested it.
 	// Later, this operation will be performed again when actually starting the service group.
-	_, composeLoadErr := (*composeService).LoadProject(ctx, api.ProjectLoadOptions{
+	_, err = composeService.LoadProject(ctx, api.ProjectLoadOptions{
 		ProjectName: serviceGroup.Name,
 		ConfigPaths: []string{dockerComposeFilePath},
 		WorkingDir:  serviceGroup.Path,
 	})
-	if composeLoadErr != nil {
-		return composeLoadErr
-	}
-
-	if envVariablePattern.Match(dockerComposeBody) { // Checks for any match.
-		err := errors.New("Docker compose file contains env variable placeholders, which are not allowed in dockerctl. Use Go templating '{{ value }}' instead.")
-		zap.L().Error(err.Error(), zap.String("serviceGroupName", serviceGroup.Name), zap.String("dockerComposeFilePath", dockerComposeFilePath))
-		return err
+	if err != nil {
+		return fmt.Errorf("service group %q: invalid compose file %s: %w", serviceGroup.Name, dockerComposeFilePath, err)
 	}
 
 	return nil

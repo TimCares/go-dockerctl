@@ -3,10 +3,10 @@ package filesystem
 import (
 	"fmt"
 
-	configModule "github.com/TimCares/go-dockerctl/internal/config"
+	"github.com/TimCares/go-dockerctl/internal/config"
 )
 
-func makeTemplateValuesDirStruct(envs *[]string, secrets bool) Dir {
+func makeTemplateValuesDirStruct(envs []string, secrets bool) Dir {
 	sopsExt := ""
 	if secrets {
 		sopsExt = ".sops"
@@ -19,7 +19,7 @@ func makeTemplateValuesDirStruct(envs *[]string, secrets bool) Dir {
 		},
 	}
 
-	for _, env := range *envs {
+	for _, env := range envs {
 		filename := fmt.Sprintf("values.%s%s.yaml", env, sopsExt)
 		secretsDirStructure[filename] = Optional{
 			Node: File{},
@@ -29,40 +29,48 @@ func makeTemplateValuesDirStruct(envs *[]string, secrets bool) Dir {
 	return secretsDirStructure
 }
 
-func makeServiceGroupDir(envs *[]string, serviceGroupConfig *configModule.ServiceGroup) Dir {
+func makeServiceGroupDir(serviceGroup *config.ServiceGroup) Dir {
 	return Dir{
 		".secrets": Optional{
-			Node: makeTemplateValuesDirStruct(envs, true),
+			Node: makeTemplateValuesDirStruct(serviceGroup.Envs, true),
 		},
 		"config": Optional{
-			Node: makeTemplateValuesDirStruct(envs, false),
+			Node: makeTemplateValuesDirStruct(serviceGroup.Envs, false),
 		},
-		"templates":                          Dir{},
-		serviceGroupConfig.DockerComposeFile: File{},
+		"templates":                    Dir{},
+		serviceGroup.DockerComposeFile: File{},
 	}
 }
 
-func MakeDockerctlFilesystem(config *configModule.Config) Dir {
-	projectStructure := Dir{
+func makeProjectDir(cfg *config.Config) Dir {
+	return Dir{
 		"dockerctl.yaml": File{},
 		".sops.yaml":     File{},
 		".secrets": Optional{
-			Node: makeTemplateValuesDirStruct(&config.Envs, true),
+			Node: makeTemplateValuesDirStruct(cfg.Envs, true),
 		},
 		"config": Optional{
-			Node: makeTemplateValuesDirStruct(&config.Envs, false),
+			Node: makeTemplateValuesDirStruct(cfg.Envs, false),
 		},
-		"templates":                              Dir{},
-		configModule.ServiceGroupsDefaultDirName: Dir{},
+		"templates": Dir{},
+	}
+}
+
+// ValidateProject checks the project root and every service group directory.
+// Service groups are validated at their resolved Path, meaning we allow
+// groups living outside the default service-groups directory.
+// However, it is encouraged to keep them in the default "service-groups" dir.
+func ValidateProject(cfg *config.Config) error {
+	if err := makeProjectDir(cfg).Validate(cfg.Runtime.ProjectDir); err != nil {
+		return err
 	}
 
-	for _, serviceGroup := range config.ServiceGroups {
-		envs := &config.Envs
-		if serviceGroup.Envs != nil {  // Takes precedence.
-			envs = &serviceGroup.Envs
+	for i := range cfg.ServiceGroups {
+		serviceGroup := &cfg.ServiceGroups[i]
+		if err := makeServiceGroupDir(serviceGroup).Validate(serviceGroup.Path); err != nil {
+			return fmt.Errorf("service group %q: %w", serviceGroup.Name, err)
 		}
-		projectStructure[configModule.ServiceGroupsDefaultDirName][serviceGroup.Name] = makeServiceGroupDir(envs, &serviceGroup)
 	}
 
-	return projectStructure
+	return nil
 }

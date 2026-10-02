@@ -22,16 +22,16 @@ var identityCommand = &cli.Command{
 }
 
 func cliCreateNewSOPSIdentity(ctx context.Context, cmd *cli.Command) error {
-	cfg, configErr := config.GetConfig(cmd.String("config"), cmd.String("project"), cmd.String("env"))
-	if configErr != nil {
-		return configErr
+	cfg, err := config.Load(cmd.String("config"), cmd.String("project"), cmd.String("env"))
+	if err != nil {
+		return err
 	}
 
-	identityPath := identity.GetSOPSIdentityPath(*cfg)
-	_, identityErr := identity.MaybeCreateNewSOPSIdentity(identityPath)
-	if identityErr != nil {
-		return identityErr
+	identityPath, err := identity.GetSOPSIdentityPath(cfg)
+	if err != nil {
+		return err
 	}
 
-	return nil
+	_, err = identity.MaybeCreateNewSOPSIdentity(identityPath)
+	return err
 }

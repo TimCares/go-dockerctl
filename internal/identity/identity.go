@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"filippo.io/age"
@@ -18,41 +19,37 @@ import (
 const defaultAgeKeyFileSubpath = "sops/age/keys.txt"
 
 func checkKeyFileExists(identityPath string) (bool, error) {
-	if _, err := os.Stat(identityPath); err == nil {
+	_, err := os.Stat(identityPath)
+	if err == nil {
 		return true, nil
-	} else if os.IsNotExist(err) {
-		return false, nil
-	} else {
-		zap.L().Error("error when checking if key file already exists", zap.String("identityPath", identityPath), zap.Error(err))
-		return false, err
 	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, fmt.Errorf("checking if key file exists: %w", err)
 }
 
-func getRecipientFromExistingIdentity(identityPath string) (*string, error) {
+func getRecipientFromExistingIdentity(identityPath string) (string, error) {
 	b, err := os.ReadFile(identityPath)
 	if err != nil {
-		zap.L().Error("found existing identity, but encountered an error when reading the file", zap.String("file", identityPath))
-		return nil, err
+		return "", fmt.Errorf("found existing identity, but could not read it: %w", err)
 	}
 
 	// age errors embed the offending line on parsing errors, which may contain the private key.
-	safeError := errors.New("found existing identity, but encountered an error when parsing the recipient")
+	safeError := fmt.Errorf("found existing identity at %s, but encountered an error when parsing the recipient", identityPath)
 
 	identities, err := age.ParseIdentities(bytes.NewReader(b))
 	if err != nil {
-		zap.L().Error(safeError.Error(), zap.String("file", identityPath))
-		return nil, safeError
+		return "", safeError
 	}
 
 	for _, id := range identities {
 		if x25519, ok := id.(*age.X25519Identity); ok {
-			recipientString := x25519.Recipient().String()
-			return &recipientString, nil
+			return x25519.Recipient().String(), nil
 		}
 	}
 
-	zap.L().Error(safeError.Error(), zap.String("file", identityPath))
-	return nil, safeError
+	return "", safeError
 }
 
 func makeKeyFileContents(identity *age.X25519Identity) []byte {
@@ -69,75 +66,83 @@ func makeKeyFileContents(identity *age.X25519Identity) []byte {
 	return []byte(keyFileContents)
 }
 
-func MaybeCreateNewSOPSIdentity(identityPath string) (*string, error) {
-	fileExists, err := checkKeyFileExists(identityPath)
+func writeKeyFile(identityPath string, data []byte) error {
+	f, err := os.OpenFile(identityPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("creating key file: %w", err)
 	}
 
-	if fileExists {
-		recipientString, err := getRecipientFromExistingIdentity(identityPath)
-		if err != nil {
-			return nil, err
-		}
-		zap.L().Info("Identity already exists", zap.String("recipient", *recipientString), zap.String("file", identityPath))
-		return recipientString, nil
-	}
-
-	// Generate new identity:
-
-	identity, err := age.GenerateX25519Identity()
-	if err != nil {
-		zap.L().Error("error generating identity", zap.Error(err))
-		return nil, err
-	}
-	recipientString := identity.Recipient().String()
-
-	parent := filepath.Dir(identityPath)
-	if err := os.MkdirAll(parent, 0700); err != nil {
-		zap.L().Error("error creating parent dirs of key file", zap.String("parent", parent), zap.Error(err))
-		return nil, err
-	}
-
-	f, err := os.OpenFile(
-		identityPath,
-		os.O_WRONLY|os.O_CREATE|os.O_EXCL,
-		0600,
-	)
-	if err != nil {
-		zap.L().Error("error creating key file", zap.String("file", identityPath), zap.Error(err))
-		return nil, err
-	}
-	defer f.Close()
-
-	data := makeKeyFileContents(identity)
-
-	if _, err := f.Write(data); err != nil {
-		zap.L().Error("error writing key data to file", zap.String("file", identityPath), zap.Error(err))
+	_, writeErr := f.Write(data)
+	closeErr := f.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
 		if removeErr := os.Remove(identityPath); removeErr != nil { // Do not surface error as there is nothing we can do.
 			zap.L().Debug("could not remove private key file after writing failed", zap.String("file", identityPath))
 		}
-		return nil, err
+		return fmt.Errorf("writing key file: %w", err)
 	}
 
+	return nil
+}
+
+// MaybeCreateNewSOPSIdentity returns the recipient (public key) of the identity at identityPath,
+// generating a new identity first if none exists.
+func MaybeCreateNewSOPSIdentity(identityPath string) (string, error) {
+	fileExists, err := checkKeyFileExists(identityPath)
+	if err != nil {
+		return "", err
+	}
+
+	if fileExists {
+		recipient, err := getRecipientFromExistingIdentity(identityPath)
+		if err != nil {
+			return "", err
+		}
+		zap.L().Info("Identity already exists", zap.String("recipient", recipient), zap.String("file", identityPath))
+		return recipient, nil
+	}
+
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		return "", fmt.Errorf("generating identity: %w", err)
+	}
+
+	parent := filepath.Dir(identityPath)
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return "", fmt.Errorf("creating parent dirs of key file: %w", err)
+	}
+
+	if err := writeKeyFile(identityPath, makeKeyFileContents(identity)); err != nil {
+		return "", err
+	}
+
+	recipient := identity.Recipient().String()
 	zap.L().Info(
 		"generated new identity, add recipient to your .sops.yaml",
-		zap.String("recipient", recipientString),
+		zap.String("recipient", recipient),
 		zap.String("identityFile", identityPath),
 	)
 
-	return &recipientString, nil
+	return recipient, nil
 }
 
-// Uses age.
-func GetSOPSIdentityPath(config config.Config) string {
-	userConfigDir := os.Getenv("XDG_CONFIG_HOME")
-	if userConfigDir == "" {
-		userConfigDir = os.Getenv("HOME")
+// sopsUserConfigDir mirrors how SOPS locates its config dir for age keys.
+func sopsUserConfigDir() (string, error) {
+	if runtime.GOOS == "darwin" {
+		if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+			return dir, nil
+		}
 	}
-	if config.ManageSOPSIdentities {
-		return filepath.Join(userConfigDir, config.Name, config.Runtime.ActiveEnv, defaultAgeKeyFileSubpath)
-	} else {
-		return filepath.Join(userConfigDir, defaultAgeKeyFileSubpath)
+	return os.UserConfigDir()
+}
+
+// GetSOPSIdentityPath returns the path of the age key file SOPS should use.
+func GetSOPSIdentityPath(cfg *config.Config) (string, error) {
+	userConfigDir, err := sopsUserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("determining user config dir: %w", err)
 	}
+	if cfg.ManageSOPSIdentities {
+		return filepath.Join(userConfigDir, cfg.Name, cfg.Runtime.ActiveEnv, defaultAgeKeyFileSubpath), nil
+	}
+	return filepath.Join(userConfigDir, defaultAgeKeyFileSubpath), nil
 }

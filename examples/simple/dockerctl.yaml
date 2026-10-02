@@ -3,6 +3,8 @@ manage_sops_identities: True
 
 name: dockerctl-simple-example-project
 
+shared_networks:
+
 envs:
   - dev
   - stage
