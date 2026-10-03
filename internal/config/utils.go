@@ -6,8 +6,10 @@ import (
 	"go.yaml.in/yaml/v4"
 )
 
+// UniqueStringList is a list of strings that rejects duplicates when decoded from YAML.
 type UniqueStringList []string
 
+// UnmarshalYAML decodes a YAML sequence and fails if any value appears more than once.
 func (s *UniqueStringList) UnmarshalYAML(node *yaml.Node) error {
 	var values []string
 

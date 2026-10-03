@@ -1,3 +1,4 @@
+// Package identity manages the age identities (key files) that SOPS uses to decrypt secrets.
 package identity
 
 import (

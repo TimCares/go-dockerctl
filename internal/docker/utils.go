@@ -1,3 +1,4 @@
+// Package docker wraps the docker compose library used to load and validate compose files.
 package docker
 
 import (
@@ -42,6 +43,8 @@ var envVariablePattern = regexp.MustCompile(
 
 var errEnvVariablePlaceholder = errors.New("docker compose file contains env variable placeholders, which are not allowed in dockerctl; use Go templating '{{ value }}' instead")
 
+// ValidateDockerComposeFile checks that a service group's compose file exists, contains no
+// ${VAR} placeholders, and parses as a valid compose project.
 func ValidateDockerComposeFile(ctx context.Context, serviceGroup *config.ServiceGroup) error {
 	dockerComposeFilePath := filepath.Join(serviceGroup.Path, serviceGroup.DockerComposeFile)
 	dockerComposeBody, err := os.ReadFile(dockerComposeFilePath) // Do not use os.Stat here, as we are also interested in the contents.

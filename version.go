@@ -1,3 +1,4 @@
+// Package dockerctl holds build metadata shared by the CLI and internal packages.
 package dockerctl
 
 // Version can be overridden at build time:

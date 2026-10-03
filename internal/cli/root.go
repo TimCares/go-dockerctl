@@ -1,3 +1,4 @@
+// Package cli defines the dockerctl command tree, its flags, and the setup that runs before every command.
 package cli
 
 import (
@@ -12,6 +13,7 @@ import (
 
 const defaultConfigFileName = "dockerctl.yaml"
 
+// New builds the root dockerctl command with its global flags and subcommands.
 func New() *cli.Command {
 	return &cli.Command{
 		Name:                   "dockerctl",

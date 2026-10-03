@@ -6,54 +6,41 @@ import (
 	"github.com/TimCares/go-dockerctl/internal/config"
 )
 
-func makeTemplateValuesDirStruct(envs []string, secrets bool) Dir {
+func makeTemplateValuesDir(envs []string, secret bool) Dir {
 	sopsExt := ""
-	if secrets {
+	if secret {
 		sopsExt = ".sops"
 	}
 
-	defaultsFileName := fmt.Sprintf("defaults%s.yaml", sopsExt)
-	secretsDirStructure := Dir{
-		defaultsFileName: Optional{
-			Node: File{},
-		},
+	file := Optional{Node: File{Secret: secret}}
+	children := map[string]Node{
+		fmt.Sprintf("defaults%s.yaml", sopsExt): file,
 	}
-
 	for _, env := range envs {
-		filename := fmt.Sprintf("values.%s%s.yaml", env, sopsExt)
-		secretsDirStructure[filename] = Optional{
-			Node: File{},
-		}
+		// Repeated assignment of "file" is ok, as structs are copied by value.
+		children[fmt.Sprintf("values.%s%s.yaml", env, sopsExt)] = file
 	}
 
-	return secretsDirStructure
+	return Dir{Secret: secret, Children: children}
 }
 
 func makeServiceGroupDir(serviceGroup *config.ServiceGroup) Dir {
-	return Dir{
-		".secrets": Optional{
-			Node: makeTemplateValuesDirStruct(serviceGroup.Envs, true),
-		},
-		"config": Optional{
-			Node: makeTemplateValuesDirStruct(serviceGroup.Envs, false),
-		},
+	return Dir{Children: map[string]Node{
+		".secrets":                     Optional{Node: makeTemplateValuesDir(serviceGroup.Envs, true)},
+		"config":                       Optional{Node: makeTemplateValuesDir(serviceGroup.Envs, false)},
 		"templates":                    Dir{},
 		serviceGroup.DockerComposeFile: File{},
-	}
+	}}
 }
 
 func makeProjectDir(cfg *config.Config) Dir {
-	return Dir{
+	return Dir{Children: map[string]Node{
 		"dockerctl.yaml": File{},
 		".sops.yaml":     File{},
-		".secrets": Optional{
-			Node: makeTemplateValuesDirStruct(cfg.Envs, true),
-		},
-		"config": Optional{
-			Node: makeTemplateValuesDirStruct(cfg.Envs, false),
-		},
-		"templates": Dir{},
-	}
+		".secrets":       Optional{Node: makeTemplateValuesDir(cfg.Envs, true)},
+		"config":         Optional{Node: makeTemplateValuesDir(cfg.Envs, false)},
+		"templates":      Dir{},
+	}}
 }
 
 // ValidateProject checks the project root and every service group directory.

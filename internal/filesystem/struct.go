@@ -1,3 +1,5 @@
+// Package filesystem describes the expected layout of a dockerctl project as a tree of
+// [Node] values and validates it against the disk.
 package filesystem
 
 import (
@@ -6,62 +8,91 @@ import (
 	"path/filepath"
 )
 
+// Node is one entry in the expected project layout.
 type Node interface {
+	// Validate returns an error if the entry at path does not match the node.
 	Validate(path string) error
 }
 
-type File struct{}
+// File expects a regular file.
+type File struct {
+	// Secret requires that only the owner can read and write: mode 0600 on Unix,
+	// see [checkSecretAccess] for Windows.
+	Secret bool
+}
 
-// Octal 600.
-type SecretFile struct{}
+// Dir expects a directory containing at least the given Children, keyed by name.
+// Entries not listed in Children are allowed.
+type Dir struct {
+	// Secret requires that only the owner can read, write, and enter: mode 0700 on Unix,
+	// see [checkSecretAccess] for Windows. It is not inherited by Children.
+	Secret   bool
+	Children map[string]Node
+}
 
-type Dir map[string]Node
-
+// Optional accepts a missing entry, but validates Node if the entry exists.
 type Optional struct {
 	Node Node
 }
 
+// AtLeastOne treats its path as a glob pattern and requires at least one match.
+// Every match must satisfy Node.
 type AtLeastOne struct {
 	Node Node
 }
 
-func validateFileImpl(path string) error {
+const (
+	secretFilePerm os.FileMode = 0o600
+	secretDirPerm  os.FileMode = 0o700
+)
+
+func stat(path, kind string) (os.FileInfo, error) {
 	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return nil, fmt.Errorf("missing %s: %s", kind, path)
+	}
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("missing file: %s", path)
-		}
-		return fmt.Errorf("stat %s: %w", path, err)
+		return nil, fmt.Errorf("stat %s: %w", path, err)
+	}
+	return info, nil
+}
+
+// Validate implements [Node].
+func (f File) Validate(path string) error {
+	info, err := stat(path, "file")
+	if err != nil {
+		return err
 	}
 
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("expected file: %s", path)
 	}
 
+	if f.Secret {
+		return checkSecretAccess(path, "file", info, secretFilePerm)
+	}
 	return nil
 }
 
-func (File) Validate(path string) error {
-	return validateFileImpl(path)
-}
-
+// Validate implements [Node]. It stops at the first invalid child.
 func (d Dir) Validate(path string) error {
-	info, err := os.Stat(path)
+	info, err := stat(path, "directory")
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("missing directory: %s", path)
-		}
-		return fmt.Errorf("stat %s: %w", path, err)
+		return err
 	}
 
 	if !info.IsDir() {
 		return fmt.Errorf("expected directory: %s", path)
 	}
 
-	for name, child := range d {
-		childPath := filepath.Join(path, name)
+	if d.Secret {
+		if err := checkSecretAccess(path, "directory", info, secretDirPerm); err != nil {
+			return err
+		}
+	}
 
-		if err := child.Validate(childPath); err != nil {
+	for name, child := range d.Children {
+		if err := child.Validate(filepath.Join(path, name)); err != nil {
 			return err
 		}
 	}
@@ -69,6 +100,7 @@ func (d Dir) Validate(path string) error {
 	return nil
 }
 
+// Validate implements [Node].
 func (o Optional) Validate(path string) error {
 	_, err := os.Stat(path)
 
@@ -83,6 +115,7 @@ func (o Optional) Validate(path string) error {
 	return o.Node.Validate(path)
 }
 
+// Validate implements [Node], with pattern used as a glob.
 func (a AtLeastOne) Validate(pattern string) error {
 	matches, err := filepath.Glob(pattern)
 	if err != nil {

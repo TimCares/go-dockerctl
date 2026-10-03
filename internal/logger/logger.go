@@ -1,3 +1,4 @@
+// Package logger configures the global zap logger.
 package logger
 
 import (

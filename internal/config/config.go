@@ -1,3 +1,4 @@
+// Package config loads and validates the dockerctl.yaml config file.
 package config
 
 import (
@@ -14,25 +15,32 @@ import (
 	"go.yaml.in/yaml/v4"
 )
 
-const configApiVersion uint = 1
+// The major version of the dockerctl.yaml config file for this code.
+const configAPIVersion uint = 1
+
+// Only the major version, as patch and minor releases should not have
+// breaking changes that require migrations.
+// We do not couple it to dockerctl.Version, as we can make a major/breaking
+// release to the code without the file format having a breaking change, but not the
+// other way around.
 
 // checkMajorAPIVersionMatch finds the first occurrence of "apiVersion" in "rawConfigBody"
 // (must be at the beginning of a line) and checks whether the (major) version matches
 // with the major version of dockerctl currently running.
 func checkMajorAPIVersionMatch(ctx context.Context, rawConfigBody []byte) error {
-	var cfg ConfigVersion
+	var cfg configVersion
 	if err := yaml.Unmarshal(rawConfigBody, &cfg); err != nil {
 		return fmt.Errorf("parsing config file, missing apiVersion: %w", err)
 	}
 
-	if cfg.ApiVersion == configApiVersion {
+	if cfg.APIVersion == configAPIVersion {
 		return nil
 	}
-	if cfg.ApiVersion > configApiVersion {
-		return fmt.Errorf("config apiVersion too high, found %d, expected %d", cfg.ApiVersion, configApiVersion)
+	if cfg.APIVersion > configAPIVersion {
+		return fmt.Errorf("config apiVersion too high, found %d, expected %d", cfg.APIVersion, configAPIVersion)
 	}
-	// cfg.ApiVersion < configApiVersion
-	see.L(ctx).Warn("config file api version larger than in code", zap.Uint("file", cfg.ApiVersion), zap.Uint("code", configApiVersion))
+	// cfg.APIVersion < configAPIVersion
+	see.L(ctx).Warn("config file api version larger than in code", zap.Uint("file", cfg.APIVersion), zap.Uint("code", configAPIVersion))
 	// Later: try to apply migrations if necessary.
 	return nil
 }

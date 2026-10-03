@@ -1,3 +1,4 @@
+// Dockerctl manages multiple docker compose projects with SOPS encrypted secrets.
 package main
 
 import (
