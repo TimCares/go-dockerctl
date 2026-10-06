@@ -24,7 +24,7 @@ func makeTemplateValuesDir(envs []string, secret bool) Dir {
 	return Dir{Secret: secret, Children: children}
 }
 
-func makeServiceGroupDir(serviceGroup *config.ServiceGroup) Dir {
+func makeServiceGroupDir(serviceGroup *config.ServiceGroupConfig) Dir {
 	return Dir{Children: map[string]Node{
 		".secrets":                     Optional{Node: makeTemplateValuesDir(serviceGroup.Envs, true)},
 		"config":                       Optional{Node: makeTemplateValuesDir(serviceGroup.Envs, false)},
@@ -34,10 +34,13 @@ func makeServiceGroupDir(serviceGroup *config.ServiceGroup) Dir {
 }
 
 func makeProjectDir(cfg *config.Config) Dir {
+	rootSecretsConfig := makeTemplateValuesDir(cfg.Envs, true)
+	rootSecretsConfig.Children["dockerctl.sops.yaml"] = Optional{File{Secret: true}}
+
 	return Dir{Children: map[string]Node{
 		"dockerctl.yaml": File{},
 		".sops.yaml":     File{},
-		".secrets":       Optional{Node: makeTemplateValuesDir(cfg.Envs, true)},
+		".secrets":       Optional{Node: rootSecretsConfig},
 		"config":         Optional{Node: makeTemplateValuesDir(cfg.Envs, false)},
 		"templates":      Dir{},
 	}}

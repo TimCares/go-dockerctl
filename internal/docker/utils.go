@@ -45,7 +45,7 @@ var errEnvVariablePlaceholder = errors.New("docker compose file contains env var
 
 // ValidateDockerComposeFile checks that a service group's compose file exists, contains no
 // ${VAR} placeholders, and parses as a valid compose project.
-func ValidateDockerComposeFile(ctx context.Context, serviceGroup *config.ServiceGroup) error {
+func ValidateDockerComposeFile(ctx context.Context, serviceGroup *config.ServiceGroupConfig) error {
 	dockerComposeFilePath := filepath.Join(serviceGroup.Path, serviceGroup.DockerComposeFile)
 	dockerComposeBody, err := os.ReadFile(dockerComposeFilePath) // Do not use os.Stat here, as we are also interested in the contents.
 	if err != nil {

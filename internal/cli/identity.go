@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/urfave/cli/v3"
 
@@ -9,20 +10,23 @@ import (
 	"github.com/TimCares/go-dockerctl/internal/identity"
 )
 
-var identityCommand = &cli.Command{
-	Name:  "identity",
-	Usage: "Manage SOPS identities",
-	Commands: []*cli.Command{
-		{
-			Name:   "init",
-			Usage:  "Create new Identity",
-			Action: cliCreateNewSOPSIdentity,
+func newIdentityCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "identity",
+		Usage: "Manage SOPS identities",
+		Commands: []*cli.Command{
+			{
+				Name:   "init",
+				Usage:  "Create new Identity",
+				Action: cliCreateNewSOPSIdentity,
+			},
 		},
-	},
+	}
 }
 
+// cliCreateNewSOPSIdentity prints the recipient to stdout, so it can be piped or captured.
 func cliCreateNewSOPSIdentity(ctx context.Context, cmd *cli.Command) error {
-	cfg, err := config.Load(ctx, cmd.String("config"), cmd.String("project"), cmd.String("env"))
+	cfg, err := config.FromContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -32,6 +36,10 @@ func cliCreateNewSOPSIdentity(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	_, err = identity.MaybeCreateNewSOPSIdentity(identityPath)
+	recipient, err := identity.MaybeCreateNewSOPSIdentity(ctx, identityPath)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(cmd.Root().Writer, recipient)
 	return err
 }

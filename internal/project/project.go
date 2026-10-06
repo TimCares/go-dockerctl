@@ -5,6 +5,7 @@ package project
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/TimCares/go-dockerctl/internal/config"
@@ -12,23 +13,24 @@ import (
 	"github.com/TimCares/go-dockerctl/internal/filesystem"
 )
 
-// Load parses the config and validates the project on disk, including every
-// service group's docker compose file. This requires a reachable Docker daemon.
-func Load(ctx context.Context, configFilePath, projectDir, activeEnv string) (*config.Config, error) {
-	cfg, err := config.Load(ctx, configFilePath, projectDir, activeEnv)
-	if err != nil {
-		return nil, err
+// Validate checks the project on disk, including every service group's docker compose file.
+//
+// cfg is the result of [config.Load]: paths and defaults are already filled in.
+// This requires a reachable Docker daemon.
+func Validate(ctx context.Context, cfg *config.Config) error {
+	if cfg == nil {
+		return errors.New("config is nil")
 	}
 
 	if err := filesystem.ValidateProject(cfg); err != nil {
-		return nil, fmt.Errorf("validating project filesystem: %w", err)
+		return fmt.Errorf("validating project filesystem: %w", err)
 	}
 
 	for i := range cfg.ServiceGroups {
 		if err := docker.ValidateDockerComposeFile(ctx, &cfg.ServiceGroups[i]); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
-	return cfg, nil
+	return nil
 }

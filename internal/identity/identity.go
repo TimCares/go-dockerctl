@@ -3,6 +3,7 @@ package identity
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -11,10 +12,12 @@ import (
 	"time"
 
 	"filippo.io/age"
+	"github.com/TimCares/go-see"
 	"go.uber.org/zap"
 
 	"github.com/TimCares/go-dockerctl"
 	"github.com/TimCares/go-dockerctl/internal/config"
+	"github.com/TimCares/go-dockerctl/internal/observability/events"
 )
 
 const defaultAgeKeyFileSubpath = "sops/age/keys.txt"
@@ -87,7 +90,7 @@ func writeKeyFile(identityPath string, data []byte) error {
 
 // MaybeCreateNewSOPSIdentity returns the recipient (public key) of the identity at identityPath,
 // generating a new identity first if none exists.
-func MaybeCreateNewSOPSIdentity(identityPath string) (string, error) {
+func MaybeCreateNewSOPSIdentity(ctx context.Context, identityPath string) (string, error) {
 	fileExists, err := checkKeyFileExists(identityPath)
 	if err != nil {
 		return "", err
@@ -98,7 +101,7 @@ func MaybeCreateNewSOPSIdentity(identityPath string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		zap.L().Info("Identity already exists", zap.String("recipient", recipient), zap.String("file", identityPath))
+		see.L(ctx).Info("Identity already exists", zap.String("recipient", recipient), zap.String("file", identityPath))
 		return recipient, nil
 	}
 
@@ -117,11 +120,7 @@ func MaybeCreateNewSOPSIdentity(identityPath string) (string, error) {
 	}
 
 	recipient := identity.Recipient().String()
-	zap.L().Info(
-		"generated new identity, add recipient to your .sops.yaml",
-		zap.String("recipient", recipient),
-		zap.String("identityFile", identityPath),
-	)
+	see.Emit(ctx, events.IdentityCreated{IdentityPath: identityPath, Recipient: recipient})
 
 	return recipient, nil
 }

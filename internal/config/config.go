@@ -10,24 +10,13 @@ import (
 	"regexp"
 	"slices"
 
-	"github.com/TimCares/go-see"
-	"go.uber.org/zap"
 	"go.yaml.in/yaml/v4"
 )
-
-// The major version of the dockerctl.yaml config file for this code.
-const configAPIVersion uint = 1
-
-// Only the major version, as patch and minor releases should not have
-// breaking changes that require migrations.
-// We do not couple it to dockerctl.Version, as we can make a major/breaking
-// release to the code without the file format having a breaking change, but not the
-// other way around.
 
 // checkMajorAPIVersionMatch finds the first occurrence of "apiVersion" in "rawConfigBody"
 // (must be at the beginning of a line) and checks whether the (major) version matches
 // with the major version of dockerctl currently running.
-func checkMajorAPIVersionMatch(ctx context.Context, rawConfigBody []byte) error {
+func checkMajorAPIVersionMatch(rawConfigBody []byte) error {
 	var cfg configVersion
 	if err := yaml.Unmarshal(rawConfigBody, &cfg); err != nil {
 		return fmt.Errorf("parsing config file, missing apiVersion: %w", err)
@@ -39,8 +28,7 @@ func checkMajorAPIVersionMatch(ctx context.Context, rawConfigBody []byte) error 
 	if cfg.APIVersion > configAPIVersion {
 		return fmt.Errorf("config apiVersion too high, found %d, expected %d", cfg.APIVersion, configAPIVersion)
 	}
-	// cfg.APIVersion < configAPIVersion
-	see.L(ctx).Warn("config file api version larger than in code", zap.Uint("file", cfg.APIVersion), zap.Uint("code", configAPIVersion))
+	// Here: cfg.APIVersion < configAPIVersion.
 	// Later: try to apply migrations if necessary.
 	return nil
 }
@@ -72,13 +60,11 @@ func validateServiceGroupConfig(config *Config) error {
 
 		if serviceGroup.Path == "" {
 			serviceGroup.Path = filepath.Join(config.Runtime.ProjectDir, ServiceGroupsDefaultDirName, serviceGroup.Name)
-			zap.L().Debug("Service group has no explicit path, using default", zap.String("serviceGroupName", serviceGroup.Name), zap.String("defaultServiceGroupPath", serviceGroup.Path))
 		} else if !filepath.IsAbs(serviceGroup.Path) {
 			serviceGroup.Path = filepath.Join(config.Runtime.ProjectDir, serviceGroup.Path)
 		}
 
 		if serviceGroup.DockerComposeFile == "" {
-			zap.L().Debug("Service group has no explicit docker compose file name, using default", zap.String("serviceGroupName", serviceGroup.Name), zap.String("DockerComposeDefaultFileName", DockerComposeDefaultFileName))
 			serviceGroup.DockerComposeFile = DockerComposeDefaultFileName
 		}
 
@@ -91,25 +77,46 @@ func validateServiceGroupConfig(config *Config) error {
 	return nil
 }
 
-// Load reads and validates the dockerctl config file. It does not touch the project
-// filesystem or Docker; see the project package for full project validation.
-func Load(ctx context.Context, configFilePath string, projectDir string, activeEnv string) (*Config, error) {
-	if configFilePath == "" {
+// Load reads and validates the dockerctl config file.
+//
+// It does not touch the project filesystem or Docker. That happens in [project.Validate].
+//
+// Value order is defaults, then the file, then explicit settings.
+func Load(_ context.Context, settings Settings) (*Config, error) {
+	if settings.ConfigPath == "" {
 		return nil, errors.New("config file path must not be empty")
 	}
 
-	configBody, err := os.ReadFile(configFilePath)
+	configBody, err := os.ReadFile(settings.ConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading config file: %w", err)
 	}
 
-	if err := checkMajorAPIVersionMatch(ctx, configBody); err != nil {
+	if err := checkMajorAPIVersionMatch(configBody); err != nil {
 		return nil, err
 	}
 
-	var cfg Config
+	// Defaults first, then the file. Unmarshalling keeps fields the file omits.
+	// applyDefaults fills observability strings the file left blank.
+	// Settings then win: path and env are not in the file.
+	// A non-nil log field is an explicit flag or environment variable.
+	cfg := DefaultConfig()
 	if err := yaml.Unmarshal(configBody, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing config file %s: %w", configFilePath, err)
+		return nil, fmt.Errorf("parsing config file %s: %w", settings.ConfigPath, err)
+	}
+	cfg.Observability.applyDefaults()
+	cfg.Runtime = RuntimeConfig{
+		ProjectDir: settings.ProjectPath,
+		ActiveEnv:  settings.Env,
+	}
+	if settings.LogLevel != nil {
+		cfg.Observability.Logging.LogLevel = *settings.LogLevel
+	}
+	if settings.LogFormat != nil {
+		cfg.Observability.Logging.LogFormat = *settings.LogFormat
+	}
+	if settings.LogFile != nil {
+		cfg.Observability.Logging.LogFile = *settings.LogFile
 	}
 
 	if len(cfg.Envs) == 0 {
@@ -120,16 +127,14 @@ func Load(ctx context.Context, configFilePath string, projectDir string, activeE
 		return nil, errors.New("at least one service group is required")
 	}
 
-	if !slices.Contains(cfg.Envs, activeEnv) {
-		return nil, fmt.Errorf("active env %q not found in list of valid environments %v", activeEnv, cfg.Envs)
-	}
-
-	cfg.Runtime = RuntimeConfig{
-		ProjectDir: projectDir,
-		ActiveEnv:  activeEnv,
+	if !slices.Contains(cfg.Envs, settings.Env) {
+		return nil, fmt.Errorf("active env %q not found in list of valid environments %v", settings.Env, cfg.Envs)
 	}
 
 	if err := validateServiceGroupConfig(&cfg); err != nil {
+		return nil, err
+	}
+	if err := validateObservabilityConfig(&cfg); err != nil {
 		return nil, err
 	}
 
