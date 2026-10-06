@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # The minimum version declared in go.mod, and the latest release.
-        go: ["1.24", "stable"]
+        # The minimum version declared in go.mod, and the latest stable release.
+        go: ["1.26", "stable"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
