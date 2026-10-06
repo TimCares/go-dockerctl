@@ -3,7 +3,7 @@ module github.com/TimCares/go-dockerctl
 go 1.26.6
 
 require (
-	filippo.io/age v1.3.1
+	filippo.io/age v1.3.2
 	github.com/TimCares/go-see v0.4.0
 	github.com/docker/cli v29.6.2+incompatible
 	github.com/docker/compose/v5 v5.4.0
