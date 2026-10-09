@@ -7,7 +7,7 @@ require (
 	github.com/TimCares/go-see v0.4.0
 	github.com/docker/cli v29.6.2+incompatible
 	github.com/docker/compose/v5 v5.4.0
-	github.com/urfave/cli/v3 v3.10.1
+	github.com/urfave/cli/v3 v3.14.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.47.0
 	go.opentelemetry.io/otel/metric v1.47.0
