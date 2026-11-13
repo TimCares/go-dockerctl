@@ -6,20 +6,15 @@ import (
 
 	"github.com/urfave/cli/v3"
 	"go.uber.org/zap/zapcore"
-
-	"github.com/TimCares/go-dockerctl"
-	"github.com/TimCares/go-dockerctl/internal/config"
 )
 
 func TestLogFieldsUseLeafCommandAndSetFlags(t *testing.T) {
-	cfg := &config.Config{
-		APIVersion: 1,
-		Name:       "demo",
-		Node:       config.NodeInfoConfig{Name: "host-1"},
-		Runtime:    config.RuntimeConfig{ActiveEnv: "dev"},
-		Observability: config.ObservabilityConfig{
-			Logging: config.LoggingConfig{ExtraFields: map[string]string{"team": "infra"}},
-		},
+	otelLogData := OtelLogData{
+		DockerctlVersion:          "v1.0.0",
+		DockerctlConfigAPIVersion: 1,
+		ProjectName:               "demo",
+		CurrentHostname:           "host-1",
+		ExtraFields:               map[string]string{"team": "infra"},
 	}
 
 	var got string
@@ -35,7 +30,7 @@ func TestLogFieldsUseLeafCommandAndSetFlags(t *testing.T) {
 				Name: "init",
 				Action: func(_ context.Context, cmd *cli.Command) error {
 					buf, err := zapcore.NewJSONEncoder(zapcore.EncoderConfig{}).
-						EncodeEntry(zapcore.Entry{}, OtelLogFields(cfg, cmd))
+						EncodeEntry(zapcore.Entry{}, OtelLogFields(otelLogData, cmd))
 					if err != nil {
 						return err
 					}
@@ -50,7 +45,7 @@ func TestLogFieldsUseLeafCommandAndSetFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := `{"service.name":"dockerctl","service.version":"` + dockerctl.Version + `",` +
+	want := `{"service.name":"dockerctl","service.version":"v1.0.0",` +
 		`"deployment.environment.name":"dev","dockerctl.project.name":"demo",` +
 		`"dockerctl.config.api_version":1,"dockerctl.command.name":"identity init",` +
 		`"host.name":"host-1","dockerctl.command.flags":{"env":"dev"},"labels":{"team":"infra"}}` + "\n"

@@ -8,19 +8,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
+	"regexp"
 	"time"
 
 	"filippo.io/age"
 	"github.com/TimCares/go-see"
+	"github.com/getsops/sops/v3"
 	"go.uber.org/zap"
 
 	"github.com/TimCares/go-dockerctl"
-	"github.com/TimCares/go-dockerctl/internal/config"
-	"github.com/TimCares/go-dockerctl/internal/observability/events"
+	internalSOPS "github.com/TimCares/go-dockerctl/internal/identity/sops"
+	"github.com/TimCares/go-dockerctl/internal/utils"
 )
 
-const defaultAgeKeyFileSubpath = "sops/age/keys.txt"
+var AgeRecipientPattern = regexp.MustCompile(`^age1[a-z0-9^1bio]{58}$`)
+
+const SOPSConfigFileName = ".sops.yaml"
+const DefaultAgeKeyFileSubpath = "sops/age/keys.txt"
 
 func checkKeyFileExists(identityPath string) (bool, error) {
 	_, err := os.Stat(identityPath)
@@ -71,7 +75,7 @@ func makeKeyFileContents(identity *age.X25519Identity) []byte {
 }
 
 func writeKeyFile(identityPath string, data []byte) error {
-	f, err := os.OpenFile(identityPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := os.OpenFile(identityPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, utils.SecretFilePerm)
 	if err != nil {
 		return fmt.Errorf("creating key file: %w", err)
 	}
@@ -88,9 +92,9 @@ func writeKeyFile(identityPath string, data []byte) error {
 	return nil
 }
 
-// MaybeCreateNewSOPSIdentity returns the recipient (public key) of the identity at identityPath,
+// MaybeCreateNewAgeIdentity returns the recipient (public key) of the identity at identityPath,
 // generating a new identity first if none exists.
-func MaybeCreateNewSOPSIdentity(ctx context.Context, identityPath string) (string, error) {
+func MaybeCreateNewAgeIdentity(ctx context.Context, identityPath string) (string, error) {
 	fileExists, err := checkKeyFileExists(identityPath)
 	if err != nil {
 		return "", err
@@ -111,7 +115,7 @@ func MaybeCreateNewSOPSIdentity(ctx context.Context, identityPath string) (strin
 	}
 
 	parent := filepath.Dir(identityPath)
-	if err := os.MkdirAll(parent, 0o700); err != nil {
+	if err := os.MkdirAll(parent, utils.SecretDirPerm); err != nil {
 		return "", fmt.Errorf("creating parent dirs of key file: %w", err)
 	}
 
@@ -120,29 +124,43 @@ func MaybeCreateNewSOPSIdentity(ctx context.Context, identityPath string) (strin
 	}
 
 	recipient := identity.Recipient().String()
-	see.Emit(ctx, events.IdentityCreated{IdentityPath: identityPath, Recipient: recipient})
 
 	return recipient, nil
 }
 
-// sopsUserConfigDir mirrors how SOPS locates its config dir for age keys.
-func sopsUserConfigDir() (string, error) {
-	if runtime.GOOS == "darwin" {
-		if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-			return dir, nil
-		}
-	}
-	return os.UserConfigDir()
+type AddSOPSIdentityArgs struct {
+	SopsConfigPath string
+	CreationRules  []string
+	SopsFilePaths  []string
+	Recipient      string
 }
 
-// GetSOPSIdentityPath returns the path of the age key file SOPS should use.
-func GetSOPSIdentityPath(cfg *config.Config) (string, error) {
-	userConfigDir, err := sopsUserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("determining user config dir: %w", err)
+func AddSOPSIdentity(ctx context.Context, opts AddSOPSIdentityArgs) error {
+	if !AgeRecipientPattern.MatchString(opts.Recipient) {
+		return fmt.Errorf("age recipient invalid, expected pattern %s, found %s", AgeRecipientPattern.String(), opts.Recipient)
 	}
-	if cfg.ManageSOPSIdentities {
-		return filepath.Join(userConfigDir, cfg.Name, cfg.Runtime.ActiveEnv, defaultAgeKeyFileSubpath), nil
+
+	if err := addAgeRecipientToSOPSConfig(ctx, opts.SopsConfigPath, opts.CreationRules, opts.Recipient); err != nil {
+		return fmt.Errorf("adding recipient to sops config %s: %w", opts.SopsConfigPath, err)
 	}
-	return filepath.Join(userConfigDir, defaultAgeKeyFileSubpath), nil
+
+	for _, sopsFilePath := range opts.SopsFilePaths {
+		err := updateOrEncrypt(ctx, opts.SopsConfigPath, sopsFilePath)
+		if err != nil {
+			return fmt.Errorf("adding recipient as recipient to %s: %w", sopsFilePath, err)
+		}
+	}
+
+	return nil
+}
+
+func updateOrEncrypt(ctx context.Context, sopsConfigFilePath string, sopsFilePath string) error {
+	if err := internalSOPS.UpdateKeys(sopsConfigFilePath, sopsFilePath); err != nil {
+		if errors.Is(err, sops.MetadataNotFound) {
+			// File not encrypted yet. Encrypt instead of updatekeys.
+			return internalSOPS.Encrypt(sopsConfigFilePath, sopsFilePath)
+		}
+		return fmt.Errorf("running sops updateKeys: %w", err)
+	}
+	return nil
 }

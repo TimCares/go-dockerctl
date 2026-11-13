@@ -9,15 +9,13 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/sdk/metric"
-
-	"github.com/TimCares/go-dockerctl/internal/config"
 )
 
 // Shutdown needs this handle to flush.
 var meterProvider *metric.MeterProvider
 
 // InitMetrics starts the OTLP metric exporter and installs it as the global meter provider.
-func InitMetrics(ctx context.Context, cfg config.OtelConfig) error {
+func InitMetrics(ctx context.Context, cfg OtelConfig) error {
 	token, err := os.ReadFile(cfg.SecretFile) // TODO: load from dockerctl.sops.yaml
 	if err != nil {
 		return fmt.Errorf("reading otel secret file: %w", err)

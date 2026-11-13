@@ -4,8 +4,12 @@ package filesystem
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+
+	"github.com/TimCares/go-dockerctl/internal/utils"
 )
 
 // Node is one entry in the expected project layout.
@@ -41,11 +45,6 @@ type AtLeastOne struct {
 	Node Node
 }
 
-const (
-	secretFilePerm os.FileMode = 0o600
-	secretDirPerm  os.FileMode = 0o700
-)
-
 func stat(path, kind string) (os.FileInfo, error) {
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
@@ -69,7 +68,7 @@ func (f File) Validate(path string) error {
 	}
 
 	if f.Secret {
-		return checkSecretAccess(path, "file", info, secretFilePerm)
+		return checkSecretAccess(path, "file", info, utils.SecretFilePerm)
 	}
 	return nil
 }
@@ -86,15 +85,32 @@ func (d Dir) Validate(path string) error {
 	}
 
 	if d.Secret {
-		if err := checkSecretAccess(path, "directory", info, secretDirPerm); err != nil {
+		if err := checkSecretAccess(path, "directory", info, utils.SecretDirPerm); err != nil {
 			return err
 		}
 	}
 
-	for name, child := range d.Children {
-		if err := child.Validate(filepath.Join(path, name)); err != nil {
+	availableChildren, err := os.ReadDir(path)
+	if err != nil {
+		return fmt.Errorf("reading directory %s: %w", path, err)
+	}
+	availableChildrenSet := make(map[string]struct{}, len(availableChildren))
+	for _, child := range availableChildren {
+		availableChildrenSet[child.Name()] = struct{}{}
+	}
+
+	childrenNames := slices.Sorted(maps.Keys(d.Children))
+
+	for _, childName := range childrenNames {
+		child := d.Children[childName]
+		if err := child.Validate(filepath.Join(path, childName)); err != nil {
 			return err
 		}
+		delete(availableChildrenSet, childName)
+	}
+
+	if len(availableChildrenSet) > 0 {
+		return fmt.Errorf("unexpected files: %s", slices.Sorted(maps.Keys(availableChildrenSet)))
 	}
 
 	return nil
@@ -126,7 +142,7 @@ func (a AtLeastOne) Validate(pattern string) error {
 		return fmt.Errorf("expected at least one match for %s", pattern)
 	}
 
-	for _, match := range matches {
+	for _, match := range slices.Sorted(slices.Values(matches)) {
 		if err := a.Node.Validate(match); err != nil {
 			return err
 		}

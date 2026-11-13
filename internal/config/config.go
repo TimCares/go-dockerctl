@@ -1,8 +1,6 @@
-// Package config loads and validates the dockerctl.yaml config file.
 package config
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,133 +8,144 @@ import (
 	"regexp"
 	"slices"
 
-	"go.yaml.in/yaml/v4"
+	"github.com/TimCares/go-dockerctl/internal/docker"
+	"github.com/TimCares/go-dockerctl/internal/observability"
+	"github.com/TimCares/go-dockerctl/internal/project"
+	"github.com/TimCares/go-dockerctl/internal/utils"
 )
 
-// checkMajorAPIVersionMatch finds the first occurrence of "apiVersion" in "rawConfigBody"
-// (must be at the beginning of a line) and checks whether the (major) version matches
-// with the major version of dockerctl currently running.
-func checkMajorAPIVersionMatch(rawConfigBody []byte) error {
-	var cfg configVersion
-	if err := yaml.Unmarshal(rawConfigBody, &cfg); err != nil {
-		return fmt.Errorf("parsing config file, missing apiVersion: %w", err)
-	}
+var validEntityNamePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`)
 
-	if cfg.APIVersion == configAPIVersion {
-		return nil
-	}
-	if cfg.APIVersion > configAPIVersion {
-		return fmt.Errorf("config apiVersion too high, found %d, expected %d", cfg.APIVersion, configAPIVersion)
-	}
-	// Here: cfg.APIVersion < configAPIVersion.
-	// Later: try to apply migrations if necessary.
-	return nil
+// NamespaceConfig is a single docker compose project managed by dockerctl.
+type NamespaceConfig struct {
+	Name              string                 `yaml:"name"`
+	Path              string                 `yaml:"path"`
+	DockerComposeFile string                 `yaml:"dockerComposeFile"`
+	Envs              utils.UniqueStringList `yaml:"envs,omitempty"` // nil (key absent) means all global envs.
+	DisableDeploy     bool                   `yaml:"disable_deploy"` // Helpful if you have a namespace that should not always be deployed, but want to list it for consistency.
 }
 
-var validServiceGroupNamePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`)
-
-// For each service group mentioned in the config, checks:
-// 1. Service group name validity and uniqueness.
-// 2. Service group path validity (if given, else set default).
+// For each namespace mentioned in the config, checks:
+// 1. Namespace name validity and uniqueness.
+// 2. Namespace path validity (if given, else set default).
 // 3. Docker compose file name validity (if given, else set default).
-// 4. Check if the envs of a service group are a subset of the global envs.
+// 4. Check if the envs of a namespace are a subset of the global envs.
 //
-// Note that it does not check the filesystem validity, only the service group configs.
 // Returns an error if any of the checked points are invalid, writes defaults into the config if fields are empty.
-func validateServiceGroupConfig(config *Config) error {
-	seenNames := make(map[string]struct{}, len(config.ServiceGroups))
-
-	for i := range config.ServiceGroups {
-		serviceGroup := &config.ServiceGroups[i]
-
-		if !validServiceGroupNamePattern.MatchString(serviceGroup.Name) {
-			return fmt.Errorf("invalid service group name %q: must be kebab-case and start with a lowercase letter", serviceGroup.Name)
-		}
-
-		if _, exists := seenNames[serviceGroup.Name]; exists {
-			return fmt.Errorf("duplicate service group name %q", serviceGroup.Name)
-		}
-		seenNames[serviceGroup.Name] = struct{}{}
-
-		if serviceGroup.Path == "" {
-			serviceGroup.Path = filepath.Join(config.Runtime.ProjectDir, ServiceGroupsDefaultDirName, serviceGroup.Name)
-		} else if !filepath.IsAbs(serviceGroup.Path) {
-			serviceGroup.Path = filepath.Join(config.Runtime.ProjectDir, serviceGroup.Path)
-		}
-
-		if serviceGroup.DockerComposeFile == "" {
-			serviceGroup.DockerComposeFile = DockerComposeDefaultFileName
-		}
-
-		if serviceGroup.Envs == nil {
-			serviceGroup.Envs = slices.Clone(config.Envs)
-		} else if !isSubset(serviceGroup.Envs, config.Envs) {
-			return fmt.Errorf("envs %v of service group %q must be a subset of global envs %v", serviceGroup.Envs, serviceGroup.Name, config.Envs)
-		}
+func (cfg *NamespaceConfig) Validate(projectPath string) error {
+	if !validEntityNamePattern.MatchString(cfg.Name) {
+		return fmt.Errorf("invalid namespace name %q: must be kebab-case and start with a lowercase letter", cfg.Name)
 	}
+
+	if cfg.Path == "" {
+		cfg.Path = filepath.Join(projectPath, project.NamespacesDirName, cfg.Name)
+	}
+	absFilePath, err := filepath.Abs(cfg.Path)
+	if err != nil {
+		return err
+	}
+	cfg.Path = absFilePath
+
+	if cfg.DockerComposeFile == "" {
+		cfg.DockerComposeFile = docker.DockerComposeFileName
+	}
+
 	return nil
 }
 
-// Load reads and validates the dockerctl config file.
+// NodeInfoConfig contains all necessary info about the node dockerctl runs on.
+type NodeInfoConfig struct {
+	Name string `yaml:"name,omitempty"`
+}
+
+// DefaultNodeInfoConfig names the node from NODE_NAME, falling back to the hostname.
+func DefaultNodeInfoConfig() NodeInfoConfig {
+	name := os.Getenv("NODE_NAME")
+	if name == "" {
+		name, _ = os.Hostname()
+	}
+	return NodeInfoConfig{
+		Name: name,
+	}
+}
+
+// Config is the parsed dockerctl.yaml file.
+type Config struct {
+	APIVersion    uint                              `yaml:"apiVersion"`
+	Name          string                            `yaml:"name"`
+	Envs          utils.UniqueStringList            `yaml:"envs"`
+	Namespaces    []NamespaceConfig                 `yaml:"namespaces"`
+	Observability observability.ObservabilityConfig `yaml:"observability"`
+	Node          NodeInfoConfig                    `yaml:"node,omitempty"`
+}
+
+// The major version of the dockerctl.yaml config file for this code.
 //
-// It does not touch the project filesystem or Docker. That happens in [project.Validate].
-//
-// Value order is defaults, then the file, then explicit settings.
-func Load(_ context.Context, settings Settings) (*Config, error) {
-	if settings.ConfigPath == "" {
-		return nil, errors.New("config file path must not be empty")
-	}
+// Only the major version, as patch and minor releases should not have
+// breaking changes that require migrations.
+// We do not couple it to dockerctl.Version, as we can make a major/breaking
+// release to the code without the file format having a breaking change, but not the
+// other way around.
+const configAPIVersion uint = 1
 
-	configBody, err := os.ReadFile(settings.ConfigPath)
-	if err != nil {
-		return nil, fmt.Errorf("reading config file: %w", err)
+// DefaultConfig is the base that the config file is unmarshalled onto.
+func DefaultConfig() Config {
+	return Config{
+		APIVersion:    configAPIVersion,
+		Observability: observability.DefaultObservabilityConfig(),
+		Node:          DefaultNodeInfoConfig(),
 	}
+}
 
-	if err := checkMajorAPIVersionMatch(configBody); err != nil {
-		return nil, err
-	}
-
-	// Defaults first, then the file. Unmarshalling keeps fields the file omits.
-	// applyDefaults fills observability strings the file left blank.
-	// Settings then win: path and env are not in the file.
-	// A non-nil log field is an explicit flag or environment variable.
-	cfg := DefaultConfig()
-	if err := yaml.Unmarshal(configBody, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing config file %s: %w", settings.ConfigPath, err)
-	}
-	cfg.Observability.applyDefaults()
-	cfg.Runtime = RuntimeConfig{
-		ProjectDir: settings.ProjectPath,
-		ActiveEnv:  settings.Env,
-	}
-	if settings.LogLevel != nil {
-		cfg.Observability.Logging.LogLevel = *settings.LogLevel
-	}
-	if settings.LogFormat != nil {
-		cfg.Observability.Logging.LogFormat = *settings.LogFormat
-	}
-	if settings.LogFile != nil {
-		cfg.Observability.Logging.LogFile = *settings.LogFile
+func (cfg *Config) Validate(projectPath string) error {
+	if !validEntityNamePattern.MatchString(cfg.Name) {
+		return fmt.Errorf("invalid project name %q: must be kebab-case and start with a lowercase letter", cfg.Name)
 	}
 
 	if len(cfg.Envs) == 0 {
-		return nil, errors.New("list of envs must not be empty")
+		return errors.New("list of envs must not be empty")
+	}
+	if err := checkValidEnvNames(cfg.Envs); err != nil {
+		return err
 	}
 
-	if len(cfg.ServiceGroups) == 0 {
-		return nil, errors.New("at least one service group is required")
+	if len(cfg.Namespaces) == 0 {
+		return errors.New("at least one namespace is required")
 	}
 
-	if !slices.Contains(cfg.Envs, settings.Env) {
-		return nil, fmt.Errorf("active env %q not found in list of valid environments %v", settings.Env, cfg.Envs)
+	seenNames := make(map[string]struct{}, len(cfg.Namespaces))
+
+	for i := range cfg.Namespaces {
+		namespaceConfig := &cfg.Namespaces[i]
+
+		if err := namespaceConfig.Validate(projectPath); err != nil {
+			return fmt.Errorf("validating namespace config %s: %w", namespaceConfig.Name, err)
+		}
+
+		if namespaceConfig.Envs == nil {
+			namespaceConfig.Envs = slices.Clone(cfg.Envs)
+		} else if !utils.IsSubset(namespaceConfig.Envs, cfg.Envs) { // Also guarantees namespaceConfig.Envs have the right regex pattern.
+			return fmt.Errorf("envs %v of namespace %s must be a subset of global envs %v", namespaceConfig.Envs, namespaceConfig.Name, cfg.Envs)
+		}
+
+		if _, exists := seenNames[namespaceConfig.Name]; exists {
+			return fmt.Errorf("duplicate namespace name %s", namespaceConfig.Name)
+		}
+		seenNames[namespaceConfig.Name] = struct{}{}
 	}
 
-	if err := validateServiceGroupConfig(&cfg); err != nil {
-		return nil, err
-	}
-	if err := validateObservabilityConfig(&cfg); err != nil {
-		return nil, err
+	if err := observability.ValidateObservabilityConfig(&cfg.Observability); err != nil {
+		return err
 	}
 
-	return &cfg, nil
+	return nil
+}
+
+func checkValidEnvNames(envs []string) error {
+	for _, env := range envs {
+		if !validEntityNamePattern.MatchString(env) {
+			return fmt.Errorf("invalid env name %q: must be kebab-case and start with a lowercase letter", env)
+		}
+	}
+	return nil
 }

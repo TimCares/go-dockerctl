@@ -1,7 +1,8 @@
-package config
+package utils
 
 import (
 	"fmt"
+	"os"
 
 	"go.yaml.in/yaml/v4"
 )
@@ -30,19 +31,32 @@ func (s *UniqueStringList) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-func isSubset[T comparable](subset, superset []T) bool {
-	counts := make(map[T]int)
+func FindExcluded[T comparable](subset, superset []T) []T {
+	excluded := []T{}
+	set := make(map[T]struct{}, len(superset))
 
-	for _, v := range superset {
-		counts[v]++
+	for _, item := range superset {
+		set[item] = struct{}{}
 	}
 
-	for _, v := range subset {
-		if counts[v] == 0 {
-			return false
+	for _, item := range subset {
+		if _, ok := set[item]; !ok {
+			excluded = append(excluded, item)
 		}
-		counts[v]--
 	}
 
-	return true
+	return excluded
+}
+
+func IsSubset[T comparable](subset, superset []T) bool {
+	excluded := FindExcluded(subset, superset)
+	return len(excluded) == 0
+}
+
+func Hostname() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	return hostname
 }

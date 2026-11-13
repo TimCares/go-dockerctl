@@ -9,10 +9,15 @@ import (
 	"github.com/urfave/cli/v3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-
-	"github.com/TimCares/go-dockerctl"
-	"github.com/TimCares/go-dockerctl/internal/config"
 )
+
+type OtelLogData struct {
+	DockerctlVersion          string
+	DockerctlConfigAPIVersion uint
+	ProjectName               string
+	CurrentHostname           string
+	ExtraFields               map[string]string
+}
 
 // OtelLogFields describe one command run and are attached to every event emitted during it.
 //
@@ -22,25 +27,25 @@ import (
 //
 // cmd must be the command whose action runs. The command passed to a Before hook
 // is the one that owns the hook, not the leaf.
-func OtelLogFields(cfg *config.Config, cmd *cli.Command) []zap.Field {
+func OtelLogFields(data OtelLogData, cmd *cli.Command) []zap.Field {
 	fields := []zap.Field{
 		zap.String("service.name", "dockerctl"),
-		zap.String("service.version", dockerctl.Version),
+		zap.String("service.version", data.DockerctlVersion),
 
-		zap.String("deployment.environment.name", cfg.Runtime.ActiveEnv),
+		zap.String("deployment.environment.name", data.ActiveEnv),
 
-		zap.String("dockerctl.project.name", cfg.Name),
-		zap.Uint("dockerctl.config.api_version", cfg.APIVersion),
+		zap.String("dockerctl.project.name", data.ProjectName),
+		zap.Uint("dockerctl.config.api_version", data.DockerctlConfigAPIVersion),
 		zap.String("dockerctl.command.name", strings.Join(cmd.Path()[1:], " ")),
 	}
 
-	if cfg.Node.Name != "" {
-		fields = append(fields, zap.String("host.name", cfg.Node.Name))
+	if data.CurrentHostname != "" {
+		fields = append(fields, zap.String("host.name", data.CurrentHostname))
 	}
 	if flags := setFlags(cmd); len(flags) > 0 {
 		fields = append(fields, zap.Object("dockerctl.command.flags", stringMap(flags)))
 	}
-	if extra := cfg.Observability.Logging.ExtraFields; len(extra) > 0 {
+	if extra := data.ExtraFields; len(extra) > 0 {
 		fields = append(fields, zap.Object("labels", stringMap(extra)))
 	}
 	return fields

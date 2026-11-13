@@ -7,10 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/TimCares/go-dockerctl/internal/utils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-
-	"github.com/TimCares/go-dockerctl/internal/config"
 )
 
 const (
@@ -28,7 +27,7 @@ var outFile *os.File
 //
 // Stdout stays reserved for command output.
 // Every record is also appended as JSON to LogFile unless it is empty, "-", or "none".
-func InitLogging(_ context.Context, logging config.LoggingConfig) (*zap.Logger, error) {
+func InitLogging(_ context.Context, logging LoggingConfig) (*zap.Logger, error) {
 	if outFile != nil {
 		_ = outFile.Close()
 		outFile = nil
@@ -104,7 +103,7 @@ func resolvedLogFile(path string) (string, bool) {
 }
 
 func openLogFile(path string) (*os.File, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), utils.SecretDirPerm); err != nil {
 		return nil, err
 	}
 
@@ -112,5 +111,5 @@ func openLogFile(path string) (*os.File, error) {
 		_ = os.Rename(path, path+".old")
 	}
 
-	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, utils.SecretFilePerm)
 }

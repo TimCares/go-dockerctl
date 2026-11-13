@@ -13,8 +13,8 @@ func ContextWithConfig(ctx context.Context, config Config) context.Context {
 	return context.WithValue(ctx, ctxConfigKey{}, config)
 }
 
-// FromContext extracts [Config] from [context.Context].
-func FromContext(ctx context.Context) (*Config, error) {
+// ConfigFromContext extracts [Config] from [context.Context].
+func ConfigFromContext(ctx context.Context) (*Config, error) {
 	config, ok := ctx.Value(ctxConfigKey{}).(Config)
 	if !ok {
 		return nil, fmt.Errorf("config missing from ctx")

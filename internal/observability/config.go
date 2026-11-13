@@ -1,15 +1,17 @@
-package config
+package observability
 
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
+	"github.com/TimCares/go-dockerctl/internal/definitions"
+	"github.com/TimCares/go-dockerctl/internal/utils"
 	"go.uber.org/zap/zapcore"
 )
+
+const dockerctlAppLogFileName string = "dockerctl.log"
 
 // LoggingConfig controls what is logged, and where to.
 //
@@ -36,28 +38,8 @@ func DefaultLoggingConfig() LoggingConfig {
 // DefaultLogFile is the platform-specific path used when logFile is unset.
 // An empty home directory disables the log file.
 func DefaultLogFile() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-
-	const name = "dockerctl.log"
-	switch runtime.GOOS {
-	case "darwin":
-		return filepath.Join(home, "Library", "Logs", "dockerctl", name)
-	case "windows":
-		base := os.Getenv("LOCALAPPDATA")
-		if base == "" {
-			base = filepath.Join(home, "AppData", "Local")
-		}
-		return filepath.Join(base, "dockerctl", name)
-	default:
-		base := os.Getenv("XDG_STATE_HOME")
-		if base == "" {
-			base = filepath.Join(home, ".local", "state")
-		}
-		return filepath.Join(base, "dockerctl", name)
-	}
+	basePath := utils.UserLogDir()
+	return filepath.Join(basePath, definitions.DockerctlAppDirName, dockerctlAppLogFileName)
 }
 
 // OtelConfig points the OTLP metrics exporter at a collector.
@@ -83,25 +65,25 @@ func DefaultObservabilityConfig() ObservabilityConfig {
 	}
 }
 
-// applyDefaults fills empty logging fields. Explicit values, including "none" for LogFile, stay.
-func (c *ObservabilityConfig) applyDefaults() {
+// ApplyDefaults fills empty logging fields. Explicit values, including "none" for LogFile, stay.
+func (cfg *ObservabilityConfig) ApplyDefaults() {
 	defaults := DefaultLoggingConfig()
-	if c.Logging.MessageKey == "" {
-		c.Logging.MessageKey = defaults.MessageKey
+	if cfg.Logging.MessageKey == "" {
+		cfg.Logging.MessageKey = defaults.MessageKey
 	}
-	if c.Logging.LogLevel == "" {
-		c.Logging.LogLevel = defaults.LogLevel
+	if cfg.Logging.LogLevel == "" {
+		cfg.Logging.LogLevel = defaults.LogLevel
 	}
-	if c.Logging.LogFormat == "" {
-		c.Logging.LogFormat = defaults.LogFormat
+	if cfg.Logging.LogFormat == "" {
+		cfg.Logging.LogFormat = defaults.LogFormat
 	}
-	if strings.TrimSpace(c.Logging.LogFile) == "" {
-		c.Logging.LogFile = defaults.LogFile
+	if strings.TrimSpace(cfg.Logging.LogFile) == "" {
+		cfg.Logging.LogFile = defaults.LogFile
 	}
 }
 
-func validateObservabilityConfig(cfg *Config) error {
-	logging := &cfg.Observability.Logging
+func ValidateObservabilityConfig(cfg *ObservabilityConfig) error {
+	logging := &cfg.Logging
 	logging.LogLevel = strings.TrimSpace(logging.LogLevel)
 	level, err := zapcore.ParseLevel(logging.LogLevel)
 	if err != nil {
@@ -118,11 +100,11 @@ func validateObservabilityConfig(cfg *Config) error {
 
 	logging.LogFile = strings.TrimSpace(logging.LogFile)
 
-	if !cfg.Observability.Otel.Enabled {
+	if !cfg.Otel.Enabled {
 		return nil
 	}
 
-	otelCfg := &cfg.Observability.Otel
+	otelCfg := &cfg.Otel
 	otelCfg.Endpoint = strings.TrimSpace(otelCfg.Endpoint)
 	if otelCfg.Endpoint == "" {
 		return errors.New("otel is enabled but endpoint is empty")
@@ -130,9 +112,6 @@ func validateObservabilityConfig(cfg *Config) error {
 	otelCfg.SecretFile = strings.TrimSpace(otelCfg.SecretFile)
 	if otelCfg.SecretFile == "" {
 		return errors.New("otel is enabled but secretFile is empty")
-	}
-	if !filepath.IsAbs(otelCfg.SecretFile) {
-		otelCfg.SecretFile = filepath.Join(cfg.Runtime.ProjectDir, otelCfg.SecretFile)
 	}
 	return nil
 }

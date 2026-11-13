@@ -2,8 +2,6 @@
 apiVersion: 0
 name: dockerctl-simple-example-project
 
-manageSopsIdentities: True
-
 sharedNetworks:
 
 envs:

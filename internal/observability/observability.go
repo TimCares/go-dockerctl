@@ -5,12 +5,10 @@ import (
 	"context"
 
 	"github.com/TimCares/go-see"
-
-	"github.com/TimCares/go-dockerctl/internal/config"
 )
 
 // Init sets up logging, makes it the default [see.Emitter], and starts metrics if enabled.
-func Init(ctx context.Context, config config.ObservabilityConfig) error {
+func Init(ctx context.Context, config ObservabilityConfig) error {
 	logger, err := InitLogging(ctx, config.Logging)
 	if err != nil {
 		return err
