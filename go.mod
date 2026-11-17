@@ -5,7 +5,7 @@ go 1.26.6
 require (
 	filippo.io/age v1.3.1
 	github.com/TimCares/go-see v0.4.0
-	github.com/docker/cli v29.6.2+incompatible
+	github.com/docker/cli v29.9.3+incompatible
 	github.com/docker/compose/v5 v5.4.0
 	github.com/getsops/sops/v3 v3.13.3
 	github.com/goccy/go-yaml v1.19.2
