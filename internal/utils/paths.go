@@ -47,7 +47,7 @@ func UserAppDataDir() string {
 
 	switch runtime.GOOS {
 	case "darwin":
-		return filepath.Join(home, "Application Support")
+		return filepath.Join(home, "Library", "Application Support")
 	case "windows":
 		base := os.Getenv("LOCALAPPDATA")
 		if base == "" {

@@ -42,6 +42,7 @@ type DockerctlProjects struct {
 func defaultDockerctlProjects() DockerctlProjects {
 	return DockerctlProjects{
 		APIVersion: dockerctlProjectsFileAPIVersion,
+		Projects:   map[uuid.UUID]Project{},
 	}
 }
 
@@ -78,6 +79,9 @@ func readProjectsFile() (*DockerctlProjects, error) {
 	if err := json.Unmarshal(projectsFileBody, &projects); err != nil {
 		return nil, fmt.Errorf("parsing projects file %s: %w", projectsFilePath, err)
 	}
+	if projects.Projects == nil {
+		projects.Projects = map[uuid.UUID]Project{}
+	}
 	return &projects, nil
 }
 
@@ -93,6 +97,9 @@ func writeProjectsFile(projects *DockerctlProjects) error {
 
 	projectsPath := projectsFilePath()
 
+	if err := os.MkdirAll(filepath.Dir(projectsPath), utils.SecretDirPerm); err != nil {
+		return err
+	}
 	if err := os.WriteFile(projectsPath, data, utils.SecretFilePerm); err != nil {
 		return err
 	}
@@ -160,14 +167,18 @@ func checkDuplicateProject(
 
 	// TODO: Check if old project path is still a valid dockerctl project?
 
-	oldProjectMetadata, err := project.ReadProjectMetaFile(otherProjectPath)
+	otherProjectMetadata, err := project.ReadProjectMetaFile(otherProjectPath)
 	if err != nil {
-		return false, fmt.Errorf("reading other project meta file %s: %w", oldProjectMetadata, err)
+		return false, fmt.Errorf("reading other project meta file %s: %w", otherProjectPath, err)
+	}
+	if otherProjectMetadata == nil {
+		see.L(ctx).Debug("Other project path has no project meta file, no duplicate project.")
+		return false, nil
 	}
 
-	if oldProjectMetadata.Id != currentProjectMetadata.Id {
-		see.L(ctx).Debug("Other project path poins to a dockerctl project with a different id, no duplicate project.",
-			zap.String("otherProjectId", oldProjectMetadata.Id.String()),
+	if otherProjectMetadata.Id != currentProjectMetadata.Id {
+		see.L(ctx).Debug("Other project path points to a dockerctl project with a different id, no duplicate project.",
+			zap.String("dockerctl.project.other_id", otherProjectMetadata.Id.String()),
 		)
 		return false, nil
 	}
@@ -217,9 +228,11 @@ func CheckProjectRegistered(ctx context.Context, opts ProjectRegisteredCheckOpts
 }
 
 func checkProjectRegistered(ctx context.Context, opts ProjectRegisteredCheckOpts, projects *DockerctlProjects) (bool, error) {
-	ctx = context.WithValue(ctx, "projectName", opts.ProjectName)
-	ctx = context.WithValue(ctx, "projectPath", opts.ProjectPath)
-	ctx = context.WithValue(ctx, "projectId", opts.ProjectMetadata.Id.String())
+	// The project name is already part of the log context of every command.
+	ctx = see.With(ctx,
+		zap.String("dockerctl.project.id", opts.ProjectMetadata.Id.String()),
+		zap.String("dockerctl.project.path", opts.ProjectPath),
+	)
 
 	project, ok := projects.Projects[opts.ProjectMetadata.Id]
 	if !ok {
@@ -228,7 +241,7 @@ func checkProjectRegistered(ctx context.Context, opts ProjectRegisteredCheckOpts
 
 	if project.Path != opts.ProjectPath {
 		otherProjectPath := project.Path
-		conflictCtx := context.WithValue(ctx, "otherProjectPath", otherProjectPath)
+		conflictCtx := see.With(ctx, zap.String("dockerctl.project.other_path", otherProjectPath))
 
 		see.L(conflictCtx).Debug("Project path does not match the path recorded, checking for duplicate project.")
 

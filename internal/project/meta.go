@@ -54,6 +54,9 @@ func WriteProjectMetaFile(projectPath string, metadata *ProjectMetadata) error {
 		return err
 	}
 
+	if err := os.MkdirAll(filepath.Dir(path), utils.UserDirPerm); err != nil {
+		return err
+	}
 	if err := os.WriteFile(path, data, utils.UserFilePerm); err != nil {
 		return err
 	}
@@ -138,7 +141,7 @@ func tryFindGitRepoInParents(startPath string) (string, error) {
 	dirPath := startPath
 	for {
 		if isGitRepo(dirPath) {
-			return startPath, nil
+			return dirPath, nil
 		}
 
 		if dirPath == home {

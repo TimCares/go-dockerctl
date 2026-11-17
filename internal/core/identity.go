@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"github.com/TimCares/go-dockerctl/internal/config"
 	"github.com/TimCares/go-dockerctl/internal/identity"
 	"github.com/TimCares/go-dockerctl/internal/manager"
+	"github.com/TimCares/go-dockerctl/internal/observability"
 	"github.com/TimCares/go-dockerctl/internal/observability/events"
 	"github.com/TimCares/go-dockerctl/internal/project"
 	"github.com/TimCares/go-dockerctl/internal/utils"
@@ -20,30 +21,31 @@ type MaybeCreateNewAgeHostIdentitiesArgs struct {
 }
 
 func MaybeCreateNewAgeHostIdentities(ctx context.Context, args MaybeCreateNewAgeHostIdentitiesArgs) ([]string, error) {
+	recipients := make([]string, 0, len(args.Envs))
 
-	recipients := make([]string, len(args.Envs))
-
-	for _, env := range args.Envs {
+	err := observability.ForEachEnv(ctx, args.Envs, func(ctx context.Context, env string) error {
 		identityPath, err := getAgeIdentityPath(args.ProjectMetadata, env)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		// TODO: should we somehow support multi-file atomic writes? Currently, we only have per-file atomic writes.
 		recipient, err := identity.MaybeCreateNewAgeIdentity(ctx, identityPath)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		recipients = append(recipients, recipient)
-		see.Emit(ctx, events.IdentityCreated{
-			Hostname:     utils.Hostname(),
-			IdentityPath: identityPath,
-			Recipient:    recipient,
-		})
+		// Note: We do NOT emit some "IdentityCreated" event here.
+		// Creating an identity is scoped to a project and env,
+		// but it doesn't change project state until the key is added as a recipient,
+		// so no event is emitted here.
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return recipients, nil
-
 }
 
 // getAgeIdentityPath returns the path of the age key file SOPS should use.
@@ -55,14 +57,14 @@ func getAgeIdentityPath(projectMetadata *project.ProjectMetadata, env string) (s
 	return filepath.Join(projectConfigDir, env, identity.DefaultAgeKeyFileSubpath), nil
 }
 
-type AddSOPSIdentityArgs struct {
+type AddSOPSRecipientArgs struct {
 	ProjectPath      string
 	NamespaceConfigs []config.NamespaceConfig
 	Envs             []string
 	Recipient        string
 }
 
-func AddSOPSIdentity(ctx context.Context, args AddSOPSIdentityArgs) error {
+func AddSOPSRecipient(ctx context.Context, args AddSOPSRecipientArgs) error {
 	sopsFilePaths := []string{}
 
 	rootParameterGroup := project.ParameterGroup{
@@ -79,6 +81,7 @@ func AddSOPSIdentity(ctx context.Context, args AddSOPSIdentityArgs) error {
 	for _, namespaceConfig := range args.NamespaceConfigs {
 		namespace := project.NewNamespace(namespaceConfig.Name, namespaceConfig.Envs)
 
+		// No full namepsace.Validate needed here.
 		if err := namespace.ValidateLayout(namespaceConfig.Path); err != nil {
 			return fmt.Errorf("validating filesystem layout of namespace %s: %w", namespace.Name, err)
 		}
@@ -102,7 +105,7 @@ func AddSOPSIdentity(ctx context.Context, args AddSOPSIdentityArgs) error {
 
 	sopsConfigPath := filepath.Join(args.ProjectPath, identity.SOPSConfigFileName)
 
-	creationRules := make([]string, len(args.Envs))
+	creationRules := make([]string, 0, len(args.Envs))
 	for _, env := range args.Envs {
 		envCreationRule := identity.SOPSConfigCreationRule(env)
 		creationRules = append(creationRules, envCreationRule)
@@ -119,13 +122,9 @@ func AddSOPSIdentity(ctx context.Context, args AddSOPSIdentityArgs) error {
 		return err
 	}
 
-	hostname := utils.Hostname()
+	// One SOPS update covers all envs, but the recipient is added once per env.
 	for _, env := range args.Envs {
-		// TODO: hostname (and env) will be included in almost every event + their metrics, so improve this redundancy.
-		// Same thing is about the current project (UUID) that we operate on!
-		see.Emit(ctx, events.IdentityAdded{
-			Hostname:  hostname,
-			Env:       env,
+		see.Emit(observability.WithEnv(ctx, env), events.IdentityAdded{
 			KeySource: identity.Age,
 			Recipient: args.Recipient,
 		})

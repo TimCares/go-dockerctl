@@ -8,7 +8,9 @@ import (
 )
 
 // Init sets up logging, makes it the default [see.Emitter], and starts metrics if enabled.
-func Init(ctx context.Context, config ObservabilityConfig) error {
+//
+// data becomes the metric resource. Pass the same data to [OtelLogFields], so logs and metrics agree.
+func Init(ctx context.Context, config ObservabilityConfig, data OtelLogData) error {
 	logger, err := InitLogging(ctx, config.Logging)
 	if err != nil {
 		return err
@@ -21,7 +23,7 @@ func Init(ctx context.Context, config ObservabilityConfig) error {
 	see.SetDefault(defaultEmitter)
 
 	if config.Otel.Enabled {
-		if err := InitMetrics(ctx, config.Otel); err != nil {
+		if err := InitMetrics(ctx, config.Otel, data); err != nil {
 			return err
 		}
 	}

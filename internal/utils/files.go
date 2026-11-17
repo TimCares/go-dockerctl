@@ -13,13 +13,14 @@ const (
 	SecretFilePerm os.FileMode = 0o600
 	// User can read + write, others can only read.
 	UserFilePerm  os.FileMode = 0o644
+	UserDirPerm   os.FileMode = 0o755
 	SecretDirPerm os.FileMode = 0o700
 )
 
 // configVersion is decoded before [Config],
 // so an incompatible file is rejected before its schema is parsed.
 type configVersion struct {
-	apiVersion uint `yaml:"apiVersion"`
+	APIVersion uint `yaml:"apiVersion"`
 }
 
 // CheckMajorAPIVersionMatch finds the first occurrence of "apiVersion" in "rawBody"
@@ -31,18 +32,18 @@ func CheckMajorAPIVersionMatch(rawBody []byte, apiVersion uint) (*uint, error) {
 		return nil, fmt.Errorf("parsing file, missing apiVersion: %w", err)
 	}
 
-	if cfg.apiVersion == apiVersion {
-		return &cfg.apiVersion, nil
+	if cfg.APIVersion == apiVersion {
+		return &cfg.APIVersion, nil
 	}
-	if cfg.apiVersion > apiVersion {
-		return nil, fmt.Errorf("apiVersion too high, found %d, expected %d", cfg.apiVersion, apiVersion)
+	if cfg.APIVersion > apiVersion {
+		return nil, fmt.Errorf("apiVersion too high, found %d, expected %d", cfg.APIVersion, apiVersion)
 	}
-	// Here: cfg.apiVersion < apiVersion. Calling code should apply migrations.
-	return &cfg.apiVersion, nil
+	// Here: cfg.APIVersion < apiVersion. Calling code should apply migrations.
+	return &cfg.APIVersion, nil
 }
 
 func FilterFilesExist(filePaths []string) ([]string, error) {
-	existingFilePaths := make([]string, len(filePaths))
+	existingFilePaths := make([]string, 0, len(filePaths))
 	for _, filePath := range filePaths {
 		_, err := os.Stat(filePath)
 		if err != nil {

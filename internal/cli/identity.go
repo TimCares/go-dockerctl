@@ -6,9 +6,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/TimCares/go-dockerctl/internal/config"
-	"github.com/TimCares/go-dockerctl/internal/main"
-	"github.com/TimCares/go-dockerctl/internal/project"
+	"github.com/TimCares/go-dockerctl/internal/core"
 )
 
 func newIdentityCommand() *cli.Command {
@@ -19,12 +17,12 @@ func newIdentityCommand() *cli.Command {
 			{
 				Name:   "create",
 				Usage:  "Create a new age host identity",
-				Action: cliCreateNewAgeHostIdentity,
+				Action: withProject(cliCreateNewAgeHostIdentity),
 			},
 			{
 				Name:   "add",
 				Usage:  "Add an age Identity as a recipient",
-				Action: cliAddSOPSIdentity,
+				Action: withProject(cliAddSOPSRecipient),
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:        "recipient",
@@ -38,60 +36,42 @@ func newIdentityCommand() *cli.Command {
 }
 
 // cliCreateNewAgeHostIdentity prints the recipient to stdout, so it can be piped or captured.
-func cliCreateNewAgeHostIdentity(ctx context.Context, cmd *cli.Command) error {
-	// We do NOT need config loading and validation here!!!
-	// TODO: change beforeRoot!
+func cliCreateNewAgeHostIdentity(ctx context.Context, cmd *cli.Command, p Project) error {
+	args := core.MaybeCreateNewAgeHostIdentitiesArgs{
+		ProjectMetadata: p.Metadata,
+		Envs:            p.Envs,
+	}
 
-	projectPath := cmd.String("project-path")
-	envs := cmd.StringSlice("envs") // beforeRoot validates correct naming already.
-
-	projectMetaData, err := project.ReadProjectMetaFile(projectPath)
+	recipients, err := core.MaybeCreateNewAgeHostIdentities(ctx, args)
 	if err != nil {
-		return fmt.Errorf("reading project metadata: %w", err)
+		return err
 	}
-
-	args := main.MaybeCreateNewAgeHostIdentitiesArgs{
-		ProjectMetadata: projectMetaData,
-		Envs:            envs,
-	}
-
-	recipients, err := main.MaybeCreateNewAgeHostIdentities(ctx, args)
 
 	writer := cmd.Root().Writer
 	for _, recipient := range recipients {
-		_, err = fmt.Fprintln(writer, recipient)
-
-		if err != nil {
+		if _, err := fmt.Fprintln(writer, recipient); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func cliAddSOPSIdentity(ctx context.Context, cmd *cli.Command) error {
-	cfg, err := config.ConfigFromContext(ctx)
-	if err != nil {
-		return err
-	}
-
-	projectPath := cmd.String("project-path")
-	envs := cmd.StringSlice("envs") // beforeRoot validates correct naming already.
-
+func cliAddSOPSRecipient(ctx context.Context, cmd *cli.Command, p Project) error {
 	recipient := cmd.String("recipient")
 	if recipient == "" {
 		return fmt.Errorf("no recipient provided")
 	}
 
-	args := main.AddSOPSIdentityArgs{
-		ProjectPath:      projectPath,
-		NamespaceConfigs: cfg.Namespaces,
-		Envs:             envs,
+	args := core.AddSOPSRecipientArgs{
+		ProjectPath:      p.Settings.ProjectPath,
+		NamespaceConfigs: p.Config.Namespaces,
+		Envs:             p.Envs,
 		Recipient:        recipient,
 	}
 
-	if err := main.AddSOPSIdentity(ctx, args); err != nil {
+	if err := core.AddSOPSRecipient(ctx, args); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(cmd.Root().Writer, recipient)
+	_, err := fmt.Fprintln(cmd.Root().Writer, recipient)
 	return err
 }
