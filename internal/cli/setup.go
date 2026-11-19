@@ -92,7 +92,7 @@ func readSettings(cmd *cli.Command) (CLISettings, error) {
 
 	configPath := cmd.String("config-path")
 	if configPath == "" {
-		configPath = filepath.Join(projectPath, project.DockerctlProjectConfigFileName)
+		configPath = project.ConfigFile(projectPath)
 	}
 	configPath, err = filepath.Abs(configPath)
 	if err != nil {

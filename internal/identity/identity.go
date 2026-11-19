@@ -23,8 +23,13 @@ import (
 
 var AgeRecipientPattern = regexp.MustCompile(`^age1[a-z0-9^1bio]{58}$`)
 
-const SOPSConfigFileName = ".sops.yaml"
-const DefaultAgeKeyFileSubpath = "sops/age/keys.txt"
+// ageKeyFileSubpath mirrors the layout SOPS uses for its own default age key file.
+const ageKeyFileSubpath = "sops/age/keys.txt"
+
+// AgeKeyFile is the age key file inside dir.
+func AgeKeyFile(dir string) string {
+	return filepath.Join(dir, ageKeyFileSubpath)
+}
 
 func checkKeyFileExists(identityPath string) (bool, error) {
 	_, err := os.Stat(identityPath)

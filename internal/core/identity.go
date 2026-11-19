@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/TimCares/go-see"
+
+	"github.com/TimCares/go-dockerctl/internal/appdirs"
 	"github.com/TimCares/go-dockerctl/internal/config"
 	"github.com/TimCares/go-dockerctl/internal/identity"
-	"github.com/TimCares/go-dockerctl/internal/manager"
 	"github.com/TimCares/go-dockerctl/internal/observability"
 	"github.com/TimCares/go-dockerctl/internal/observability/events"
 	"github.com/TimCares/go-dockerctl/internal/project"
 	"github.com/TimCares/go-dockerctl/internal/utils"
-	"github.com/TimCares/go-see"
 )
 
 type MaybeCreateNewAgeHostIdentitiesArgs struct {
@@ -50,11 +51,11 @@ func MaybeCreateNewAgeHostIdentities(ctx context.Context, args MaybeCreateNewAge
 
 // getAgeIdentityPath returns the path of the age key file SOPS should use.
 func getAgeIdentityPath(projectMetadata *project.ProjectMetadata, env string) (string, error) {
-	projectConfigDir, err := manager.DockerctlProjectConfigDir(projectMetadata)
+	envDir, err := appdirs.ProjectEnvDir(projectMetadata.Id, env)
 	if err != nil {
-		return "", fmt.Errorf("determining project config dir: %w", err)
+		return "", fmt.Errorf("determining project env dir: %w", err)
 	}
-	return filepath.Join(projectConfigDir, env, identity.DefaultAgeKeyFileSubpath), nil
+	return identity.AgeKeyFile(envDir), nil
 }
 
 type AddSOPSRecipientArgs struct {
@@ -74,7 +75,7 @@ func AddSOPSRecipient(ctx context.Context, args AddSOPSRecipientArgs) error {
 
 	rootSOPSFilePaths := rootParameterGroup.IterFilesOrdered(args.Envs)
 	for i := range rootSOPSFilePaths {
-		rootSOPSFilePaths[i] = filepath.Join(args.ProjectPath, project.SecretsDirName, rootSOPSFilePaths[i])
+		rootSOPSFilePaths[i] = filepath.Join(project.SecretsDir(args.ProjectPath), rootSOPSFilePaths[i])
 	}
 	sopsFilePaths = append(sopsFilePaths, rootSOPSFilePaths...)
 
@@ -92,7 +93,7 @@ func AddSOPSRecipient(ctx context.Context, args AddSOPSRecipientArgs) error {
 		}
 
 		for i := range namespaceSopsFilePaths {
-			namespaceSopsFilePaths[i] = filepath.Join(namespaceConfig.Path, project.SecretsDirName, namespaceSopsFilePaths[i])
+			namespaceSopsFilePaths[i] = filepath.Join(project.SecretsDir(namespaceConfig.Path), namespaceSopsFilePaths[i])
 		}
 
 		sopsFilePaths = append(sopsFilePaths, namespaceSopsFilePaths...)
@@ -103,7 +104,7 @@ func AddSOPSRecipient(ctx context.Context, args AddSOPSRecipientArgs) error {
 		return err
 	}
 
-	sopsConfigPath := filepath.Join(args.ProjectPath, identity.SOPSConfigFileName)
+	sopsConfigPath := project.SOPSConfigFile(args.ProjectPath)
 
 	creationRules := make([]string, 0, len(args.Envs))
 	for _, env := range args.Envs {

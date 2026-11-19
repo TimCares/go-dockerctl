@@ -38,7 +38,7 @@ func (cfg *NamespaceConfig) Validate(projectPath string) error {
 	}
 
 	if cfg.Path == "" {
-		cfg.Path = filepath.Join(projectPath, project.NamespacesDirName, cfg.Name)
+		cfg.Path = project.NamespaceDir(projectPath, cfg.Name)
 	} else if !filepath.IsAbs(cfg.Path) {
 		cfg.Path = filepath.Join(projectPath, cfg.Path) // Resolve against the path of the project dir, not the CWD.
 	}

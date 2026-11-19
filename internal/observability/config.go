@@ -3,15 +3,12 @@ package observability
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
-	"github.com/TimCares/go-dockerctl/internal/definitions"
-	"github.com/TimCares/go-dockerctl/internal/utils"
 	"go.uber.org/zap/zapcore"
-)
 
-const dockerctlAppLogFileName string = "dockerctl.log"
+	"github.com/TimCares/go-dockerctl/internal/appdirs"
+)
 
 // LoggingConfig controls what is logged, and where to.
 //
@@ -38,11 +35,11 @@ func DefaultLoggingConfig() LoggingConfig {
 // DefaultLogFile is the platform-specific path used when logFile is unset.
 // Without a home directory it is empty, which disables the log file.
 func DefaultLogFile() string {
-	basePath, err := utils.UserLogDir()
+	path, err := appdirs.LogFile()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(basePath, definitions.DockerctlAppDirName, dockerctlAppLogFileName)
+	return path
 }
 
 // OtelConfig points the OTLP metrics exporter at a collector.

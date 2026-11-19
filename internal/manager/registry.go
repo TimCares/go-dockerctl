@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/TimCares/go-dockerctl/internal/definitions"
+	"github.com/TimCares/go-dockerctl/internal/appdirs"
 	"github.com/TimCares/go-dockerctl/internal/project"
 	"github.com/TimCares/go-dockerctl/internal/utils"
 	"github.com/TimCares/go-see"
@@ -46,18 +46,10 @@ func defaultDockerctlProjects() DockerctlProjects {
 	}
 }
 
-func projectsFilePath() (string, error) {
-	parent, err := definitions.DockerctlAppDataDir()
-	if err != nil {
-		return "", fmt.Errorf("determining app data dir: %w", err)
-	}
-	return filepath.Join(parent, definitions.DockerctlAppProjectsFileName), nil
-}
-
 func readProjectsFile() (*DockerctlProjects, error) {
-	projectsFilePath, err := projectsFilePath()
+	projectsFilePath, err := appdirs.ProjectsFile()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("determining projects file path: %w", err)
 	}
 
 	projectsFileBody, err := os.ReadFile(projectsFilePath)
@@ -101,9 +93,9 @@ func writeProjectsFile(projects *DockerctlProjects) error {
 		return err
 	}
 
-	projectsPath, err := projectsFilePath()
+	projectsPath, err := appdirs.ProjectsFile()
 	if err != nil {
-		return err
+		return fmt.Errorf("determining projects file path: %w", err)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(projectsPath), utils.SecretDirPerm); err != nil {
@@ -142,15 +134,9 @@ func RegisterProject(name string, path string, existing *project.ProjectMetadata
 }
 
 func registerProject(name string, path string, existing *project.ProjectMetadata, projects *DockerctlProjects) (*project.ProjectMetadata, *DockerctlProjects, error) {
-	var projectUUID uuid.UUID
-	if existing != nil {
-		projectUUID = existing.Id
-	} else {
-		var err error
-		projectUUID, err = uuid.NewV7()
-		if err != nil {
-			return nil, nil, fmt.Errorf("creating id for project %s: %w", name, err)
-		}
+	projectUUID, err := existingOrNewID(existing)
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating id for project %s: %w", name, err)
 	}
 
 	projects.Projects[projectUUID] = Project{
@@ -163,7 +149,13 @@ func registerProject(name string, path string, existing *project.ProjectMetadata
 	}
 
 	return &metadata, projects, nil
+}
 
+func existingOrNewID(existing *project.ProjectMetadata) (uuid.UUID, error) {
+	if existing != nil {
+		return existing.Id, nil
+	}
+	return uuid.NewV7()
 }
 
 func checkDuplicateProject(

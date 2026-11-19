@@ -19,15 +19,8 @@ type ProjectMetadata struct {
 	Id uuid.UUID `json:"id"`
 }
 
-const DockerctlProjectMetaDirName string = ".dockerctl"
-const DockerctlProjectMetaFileName string = "project.json"
-
-func ProjectMetaFilePath(projectPath string) string {
-	return filepath.Join(projectPath, DockerctlProjectMetaDirName, DockerctlProjectMetaFileName)
-}
-
 func ReadProjectMetaFile(projectPath string) (*ProjectMetadata, error) {
-	path := ProjectMetaFilePath(projectPath)
+	path := MetaFile(projectPath)
 
 	projectsMetaFileBody, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -46,7 +39,7 @@ func ReadProjectMetaFile(projectPath string) (*ProjectMetadata, error) {
 }
 
 func WriteProjectMetaFile(projectPath string, metadata *ProjectMetadata) error {
-	path := ProjectMetaFilePath(projectPath)
+	path := MetaFile(projectPath)
 
 	data, err := json.MarshalIndent(metadata, "", "  ") // Indent by 2.
 	if err != nil {
@@ -101,7 +94,7 @@ func MaybeAddProjectMetaFileToGitignore(ctx context.Context, projectPath string)
 		return
 	}
 
-	pathToMetafile := ProjectMetaFilePath(projectPathAbs)
+	pathToMetafile := MetaFile(projectPathAbs)
 	pathToMetafileRel, err := filepath.Rel(gitRepoPathAbs, pathToMetafile)
 	if err != nil {
 		return
@@ -114,7 +107,7 @@ func MaybeAddProjectMetaFileToGitignore(ctx context.Context, projectPath string)
 }
 
 func gitignoreAlreadyContainsIgnore(gitignoreContent string) bool {
-	projectMetaFileIdentifier := ProjectMetaFilePath("")
+	projectMetaFileIdentifier := MetaFile("")
 	for ignoreFilePath := range strings.SplitSeq(gitignoreContent, "\n") {
 		if strings.HasPrefix(ignoreFilePath, "#") {
 			continue // Is comment line.

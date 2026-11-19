@@ -111,9 +111,9 @@ func (n Namespace) ValidateLayout(path string) error {
 
 func (n Namespace) makeFilesystemLayout() fs.Dir {
 	return fs.Dir{Children: map[string]fs.Node{
-		SecretsDirName:               fs.Optional{Node: n.secretsGroup.MakeFilesystemLayout()},
-		ConfigDirName:                fs.Optional{Node: n.valuesGroup.MakeFilesystemLayout()},
-		TemplatesDirName:             fs.Optional{Node: fs.Dir{}},
+		secretsDirName:               fs.Optional{Node: n.secretsGroup.MakeFilesystemLayout()},
+		configDirName:                fs.Optional{Node: n.valuesGroup.MakeFilesystemLayout()},
+		templatesDirName:             fs.Optional{Node: fs.Dir{}},
 		docker.DockerComposeFileName: fs.File{},
 	}}
 }
