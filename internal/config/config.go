@@ -27,7 +27,7 @@ type NamespaceConfig struct {
 
 // For each namespace mentioned in the config, checks:
 // 1. Namespace name validity and uniqueness.
-// 2. Namespace path validity (if given, else set default).
+// 2. Namespace path validity (if given, else set default). A relative path is relative to the project, not the working directory.
 // 3. Docker compose file name validity (if given, else set default).
 // 4. Check if the envs of a namespace are a subset of the global envs.
 //
@@ -39,6 +39,8 @@ func (cfg *NamespaceConfig) Validate(projectPath string) error {
 
 	if cfg.Path == "" {
 		cfg.Path = filepath.Join(projectPath, project.NamespacesDirName, cfg.Name)
+	} else if !filepath.IsAbs(cfg.Path) {
+		cfg.Path = filepath.Join(projectPath, cfg.Path) // Resolve against the path of the project dir, not the CWD.
 	}
 	absFilePath, err := filepath.Abs(cfg.Path)
 	if err != nil {

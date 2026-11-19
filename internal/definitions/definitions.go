@@ -19,8 +19,11 @@ func DockerctlAppConfigDir() (string, error) {
 	return path, nil
 }
 
-func DockerctlAppDataDir() string {
-	parent := utils.UserAppDataDir()
+func DockerctlAppDataDir() (string, error) {
+	parent, err := utils.UserAppDataDir()
+	if err != nil {
+		return "", err
+	}
 	path := filepath.Join(parent, DockerctlAppDirName)
-	return path
+	return path, nil
 }

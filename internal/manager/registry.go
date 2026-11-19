@@ -46,13 +46,19 @@ func defaultDockerctlProjects() DockerctlProjects {
 	}
 }
 
-func projectsFilePath() string {
-	parent := definitions.DockerctlAppDataDir()
-	return filepath.Join(parent, definitions.DockerctlAppProjectsFileName)
+func projectsFilePath() (string, error) {
+	parent, err := definitions.DockerctlAppDataDir()
+	if err != nil {
+		return "", fmt.Errorf("determining app data dir: %w", err)
+	}
+	return filepath.Join(parent, definitions.DockerctlAppProjectsFileName), nil
 }
 
 func readProjectsFile() (*DockerctlProjects, error) {
-	projectsFilePath := projectsFilePath()
+	projectsFilePath, err := projectsFilePath()
+	if err != nil {
+		return nil, err
+	}
 
 	projectsFileBody, err := os.ReadFile(projectsFilePath)
 
@@ -95,7 +101,10 @@ func writeProjectsFile(projects *DockerctlProjects) error {
 		return err
 	}
 
-	projectsPath := projectsFilePath()
+	projectsPath, err := projectsFilePath()
+	if err != nil {
+		return err
+	}
 
 	if err := os.MkdirAll(filepath.Dir(projectsPath), utils.SecretDirPerm); err != nil {
 		return err
@@ -106,13 +115,18 @@ func writeProjectsFile(projects *DockerctlProjects) error {
 	return nil
 }
 
-func RegisterProject(name string, path string) (*project.ProjectMetadata, error) {
+// RegisterProject adds the project at path to the registry.
+//
+// An existing id is kept, e.g. after the registry was lost, so that the project dir
+// of the id (containing e.g. age keys) stays associated with the project.
+// A nil existing creates a new id.
+func RegisterProject(name string, path string, existing *project.ProjectMetadata) (*project.ProjectMetadata, error) {
 	projects, err := readProjectsFile()
 	if err != nil {
 		return nil, err
 	}
 
-	projectMetadata, projects, err := registerProject(name, path, projects)
+	projectMetadata, projects, err := registerProject(name, path, existing, projects)
 	if err != nil {
 		return nil, err
 	}
@@ -127,10 +141,16 @@ func RegisterProject(name string, path string) (*project.ProjectMetadata, error)
 	return projectMetadata, nil
 }
 
-func registerProject(name string, path string, projects *DockerctlProjects) (*project.ProjectMetadata, *DockerctlProjects, error) {
-	projectUUID, err := uuid.NewV7()
-	if err != nil {
-		return nil, nil, fmt.Errorf("creating id for project %s: %w", name, err)
+func registerProject(name string, path string, existing *project.ProjectMetadata, projects *DockerctlProjects) (*project.ProjectMetadata, *DockerctlProjects, error) {
+	var projectUUID uuid.UUID
+	if existing != nil {
+		projectUUID = existing.Id
+	} else {
+		var err error
+		projectUUID, err = uuid.NewV7()
+		if err != nil {
+			return nil, nil, fmt.Errorf("creating id for project %s: %w", name, err)
+		}
 	}
 
 	projects.Projects[projectUUID] = Project{
@@ -149,9 +169,9 @@ func registerProject(name string, path string, projects *DockerctlProjects) (*pr
 func checkDuplicateProject(
 	ctx context.Context,
 	currentProjectMetadata *project.ProjectMetadata,
+	currentProjectPath string,
 	otherProjectPath string,
 ) (bool, error) {
-
 	info, err := os.Stat(otherProjectPath)
 	if os.IsNotExist(err) {
 		see.L(ctx).Debug("Project was moved, no duplicate project.")
@@ -162,6 +182,15 @@ func checkDuplicateProject(
 	}
 	if !info.IsDir() {
 		see.L(ctx).Debug("Other project path is a file, so it cannot be a duplicate project.")
+		return false, nil
+	}
+
+	currentInfo, err := os.Stat(currentProjectPath)
+	if err != nil {
+		return false, fmt.Errorf("stat: checking current project path %s: %w", currentProjectPath, err)
+	}
+	if os.SameFile(info, currentInfo) {
+		see.L(ctx).Debug("Other project path is the same dir reached through another path, e.g. a symlink, no duplicate project.")
 		return false, nil
 	}
 
@@ -188,7 +217,8 @@ func checkDuplicateProject(
 }
 
 type ProjectRegisteredCheckOpts struct {
-	ProjectName     string
+	ProjectName string
+	// ProjectPath must be absolute, as it is persisted and compared across working directories.
 	ProjectPath     string
 	ProjectMetadata *project.ProjectMetadata
 }
@@ -245,7 +275,7 @@ func checkProjectRegistered(ctx context.Context, opts ProjectRegisteredCheckOpts
 
 		see.L(conflictCtx).Debug("Project path does not match the path recorded, checking for duplicate project.")
 
-		projectIsDuplicate, err := checkDuplicateProject(conflictCtx, opts.ProjectMetadata, otherProjectPath)
+		projectIsDuplicate, err := checkDuplicateProject(conflictCtx, opts.ProjectMetadata, opts.ProjectPath, otherProjectPath)
 		if err != nil {
 			return true, fmt.Errorf("checking for duplicate project at %s: %w", otherProjectPath, err)
 		}

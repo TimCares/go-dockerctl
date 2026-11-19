@@ -38,7 +38,10 @@ type ProjectActionFunc func(ctx context.Context, cmd *cli.Command, p Project) er
 // sets up observability and ensures the project is registered.
 func withProject(action ProjectActionFunc) cli.ActionFunc {
 	return func(ctx context.Context, cmd *cli.Command) error {
-		settings := readSettings(cmd)
+		settings, err := readSettings(cmd)
+		if err != nil {
+			return err
+		}
 
 		cfg, err := loadConfig(settings)
 		if err != nil {
@@ -81,19 +84,29 @@ func withProject(action ProjectActionFunc) cli.ActionFunc {
 }
 
 // readSettings reads the global flags. Flags of ancestors are visible from the leaf command.
-func readSettings(cmd *cli.Command) CLISettings {
-	settings := CLISettings{
-		ProjectPath: cmd.String("project-path"),
-		ConfigPath:  cmd.String("config-path"),
+func readSettings(cmd *cli.Command) (CLISettings, error) {
+	projectPath, err := filepath.Abs(cmd.String("project-path"))
+	if err != nil {
+		return CLISettings{}, fmt.Errorf("resolving project path: %w", err)
+	}
+
+	configPath := cmd.String("config-path")
+	if configPath == "" {
+		configPath = filepath.Join(projectPath, project.DockerctlProjectConfigFileName)
+	}
+	configPath, err = filepath.Abs(configPath)
+	if err != nil {
+		return CLISettings{}, fmt.Errorf("resolving config path: %w", err)
+	}
+
+	return CLISettings{
+		ProjectPath: projectPath,
+		ConfigPath:  configPath,
 		Envs:        cmd.StringSlice("envs"),
 		LogLevel:    optionalString(cmd, "log-level"),
 		LogFormat:   optionalString(cmd, "log-format"),
 		LogFile:     optionalString(cmd, "log-file"),
-	}
-	if settings.ConfigPath == "" {
-		settings.ConfigPath = filepath.Join(settings.ProjectPath, project.DockerctlProjectConfigFileName)
-	}
-	return settings
+	}, nil
 }
 
 func loadConfig(settings CLISettings) (*config.Config, error) {
@@ -159,7 +172,7 @@ func ensureProjectRegistered(ctx context.Context, projectName string, projectPat
 	}
 
 	if !registered {
-		projectMetadata, err = manager.RegisterProject(projectName, projectPath)
+		projectMetadata, err = manager.RegisterProject(projectName, projectPath, projectMetadata)
 		if err != nil {
 			return nil, fmt.Errorf("registering project %s: %w", projectName, err)
 		}

@@ -36,9 +36,12 @@ func DefaultLoggingConfig() LoggingConfig {
 }
 
 // DefaultLogFile is the platform-specific path used when logFile is unset.
-// An empty home directory disables the log file.
+// Without a home directory it is empty, which disables the log file.
 func DefaultLogFile() string {
-	basePath := utils.UserLogDir()
+	basePath, err := utils.UserLogDir()
+	if err != nil {
+		return ""
+	}
 	return filepath.Join(basePath, definitions.DockerctlAppDirName, dockerctlAppLogFileName)
 }
 

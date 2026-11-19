@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/TimCares/go-dockerctl/internal/utils"
@@ -160,11 +159,6 @@ func tryFindGitRepoInParents(startPath string) (string, error) {
 }
 
 func isGitRepo(dirPath string) bool {
-	items, err := os.ReadDir(dirPath)
-	if err != nil {
-		return false
-	}
-	return slices.ContainsFunc(items, func(entry os.DirEntry) bool {
-		return entry.Name() == ".git" && entry.IsDir()
-	})
+	_, err := os.Stat(filepath.Join(dirPath, ".git"))
+	return err == nil
 }
